@@ -1,8 +1,8 @@
 <?php
-// ==========================================
-// ROADRANGERS CAPSTONE PROJECT - BACKEND API PROXY
-// DEVELOPER NOTE: Handles Gemini API payload parsing for LTO text conversion
-// ==========================================
+
+
+
+
 
 session_start();
 header('Content-Type: application/json');

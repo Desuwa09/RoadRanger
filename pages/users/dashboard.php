@@ -10,19 +10,74 @@
     $conn = db_connect();
     $user_id = $_SESSION['user_id'];
 
-    // Fetch the logged-in user's profile and current system difficulty setting
-    $stmt = $conn->prepare("SELECT first_name, last_name, gender, current_difficulty FROM users WHERE user_id = ?");
+    $profile_message = '';
+    $profile_message_type = '';
+    $profile_form = [
+        'first_name' => '',
+        'last_name' => '',
+        'gender' => '',
+        'phone' => '',
+        'birthday' => ''
+    ];
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
+        $profile_form['first_name'] = trim($_POST['first_name'] ?? '');
+        $profile_form['last_name'] = trim($_POST['last_name'] ?? '');
+        $profile_form['gender'] = trim($_POST['gender'] ?? '');
+        $profile_form['phone'] = trim($_POST['phone'] ?? '');
+        $profile_form['birthday'] = trim($_POST['birthday'] ?? '');
+
+        if ($profile_form['first_name'] === '' || $profile_form['last_name'] === '') {
+            $profile_message = 'Please enter both your first and last name.';
+            $profile_message_type = 'error';
+        } else {
+            try {
+                $update_stmt = $conn->prepare("UPDATE users SET first_name = ?, last_name = ?, gender = ?, phone = ?, birthday = ? WHERE user_id = ?");
+                $update_stmt->execute([
+                    $profile_form['first_name'],
+                    $profile_form['last_name'],
+                    $profile_form['gender'],
+                    $profile_form['phone'],
+                    $profile_form['birthday'],
+                    $user_id
+                ]);
+
+                $_SESSION['first_name'] = $profile_form['first_name'];
+                $_SESSION['last_name'] = $profile_form['last_name'];
+
+                $profile_message = 'Profile updated successfully.';
+                $profile_message_type = 'success';
+            } catch (PDOException $e) {
+                $profile_message = 'Unable to update your profile right now.';
+                $profile_message_type = 'error';
+            }
+        }
+    }
+
+    
+    $stmt = $conn->prepare("SELECT first_name, last_name, gender, phone, birthday, current_difficulty FROM users WHERE user_id = ?");
     $stmt->execute([$user_id]); 
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    if ($user) {
+        $profile_form['first_name'] = $profile_form['first_name'] !== '' ? $profile_form['first_name'] : ($user['first_name'] ?? '');
+        $profile_form['last_name'] = $profile_form['last_name'] !== '' ? $profile_form['last_name'] : ($user['last_name'] ?? '');
+        $profile_form['gender'] = $profile_form['gender'] !== '' ? $profile_form['gender'] : ($user['gender'] ?? '');
+        $profile_form['phone'] = $profile_form['phone'] !== '' ? $profile_form['phone'] : ($user['phone'] ?? '');
+        $profile_form['birthday'] = $profile_form['birthday'] !== '' ? $profile_form['birthday'] : ($user['birthday'] ?? '');
+    }
+
     $hazard_modules = [];
     $learning_modules = [];
+    $memory_progress = ['percent' => 0, 'is_completed' => 0];
+    $conveyor_progress = ['percent' => 0, 'is_completed' => 0];
+    $module_stats = ['total' => 0, 'completed' => 0];
     try {
-        // Fallback to 'EASY' if the column value hasn't been set in the database record yet
+        
         $player_difficulty = $user['current_difficulty'] ?? 'EASY';
 
-        // SQL CASE statement priorities: Matching difficulty gets weight 0, others get weight 1.
-        // Sorting by weight ASC puts 0 (Recommended/System Difficulty) at the top.
+        
+        
         $module_stmt = $conn->prepare("SELECT gl.level_id, gl.title, gl.difficulty, gl.description 
                                        FROM game_levels gl 
                                        JOIN games g ON gl.game_id = g.game_id 
@@ -36,6 +91,32 @@
         $learning_stmt = $conn->prepare("SELECT lm.module_id, lm.chapter_number, lm.title, lm.description, lm.created_at, COALESCE(p.progress_percent, 0) AS progress_percent, COALESCE(p.is_completed, 0) AS is_completed FROM learning_modules lm LEFT JOIN progress p ON p.module_id = lm.module_id AND p.user_id = ? AND p.game_name = 'learning_module' AND p.stage_number = 0 ORDER BY lm.chapter_number ASC, lm.module_id ASC");
         $learning_stmt->execute([$user_id]);
         $learning_modules = $learning_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $memory_stmt = $conn->prepare("SELECT progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'memory_game' AND stage_number = 0 LIMIT 1");
+        $memory_stmt->execute([$user_id]);
+        $memory_progress_row = $memory_stmt->fetch(PDO::FETCH_ASSOC);
+        if ($memory_progress_row) {
+            $memory_progress['percent'] = intval($memory_progress_row['progress_percent'] ?? 0);
+            $memory_progress['is_completed'] = intval($memory_progress_row['is_completed'] ?? 0);
+        }
+
+        $conveyor_stmt = $conn->prepare("SELECT progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'conveyor_mania' AND stage_number = 0 LIMIT 1");
+        $conveyor_stmt->execute([$user_id]);
+        $conveyor_progress_row = $conveyor_stmt->fetch(PDO::FETCH_ASSOC);
+        if ($conveyor_progress_row) {
+            $conveyor_progress['percent'] = intval($conveyor_progress_row['progress_percent'] ?? 0);
+            $conveyor_progress['is_completed'] = intval($conveyor_progress_row['is_completed'] ?? 0);
+        }
+
+        $module_count_stmt = $conn->prepare("SELECT COUNT(*) AS total_modules FROM learning_modules");
+        $module_count_stmt->execute();
+        $module_count_row = $module_count_stmt->fetch(PDO::FETCH_ASSOC);
+        $module_stats['total'] = intval($module_count_row['total_modules'] ?? 0);
+
+        $completed_module_stmt = $conn->prepare("SELECT COUNT(*) AS completed_modules FROM progress WHERE user_id = ? AND game_name = 'learning_module' AND stage_number = 0 AND is_completed = 1");
+        $completed_module_stmt->execute([$user_id]);
+        $completed_module_row = $completed_module_stmt->fetch(PDO::FETCH_ASSOC);
+        $module_stats['completed'] = intval($completed_module_row['completed_modules'] ?? 0);
     } catch (PDOException $e) {
         $hazard_modules = [];
         $learning_modules = [];
@@ -65,7 +146,7 @@
         $hazard_progress_percent = 0;
     }
 
-    // Determine user avatar initials
+    
     $initials = "";
     if ($user && !empty($user['first_name']) && !empty($user['last_name'])) {
         $initials = strtoupper(substr($user['first_name'], 0, 1) . substr($user['last_name'], 0, 1));
@@ -88,7 +169,6 @@
             display: flex;
         }
 
-        /* Side Navigation Menu Styling */
         .sidebar {
             width: 240px;
             background: #2c3e50;
@@ -117,6 +197,10 @@
             background: #1a252f;
             color: white;
         }
+        .nav-btn.profile-btn {
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin-top: 8px;
+        }
         .sidebar .logout-btn {
             color: #e74c3c;
             display: block;
@@ -125,7 +209,6 @@
             margin-top: 50px;
         }
 
-        /* Main Content Structure */
         .main-content {
             flex-grow: 1;
             padding: 30px;
@@ -137,7 +220,6 @@
             display: block; 
         }
 
-        /* Backend Test Panel Styles */
         .test-panel { 
             background: white; 
             padding: 20px; 
@@ -155,7 +237,6 @@
         .data-row { margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
         .label { font-weight: bold; color: #555; }
 
-        /* Shared Game Wrapper Structural Styles */
         .game-wrapper {
             background: white;
             padding: 25px;
@@ -171,7 +252,6 @@
             font-weight: bold;
         }
         
-        /* Memory Game Layout Styles */
         #mg-plate-display {
             background: #f8f9fa;
             border: 3px solid #333;
@@ -214,7 +294,6 @@
         }
         .is-disabled { opacity: 0.5; pointer-events: none; }
 
-        /* Conveyor Mania UI Layout Elements */
         .cm-conveyor-belt {
             background: #34495e;
             border-radius: 6px;
@@ -266,13 +345,11 @@
             border-color: #2980b9;
         }
         
-        /* Action Sorting Feedback Colors */
         .cm-dropzone.correct-flash { background: #2ecc71 !important; color: white; border-color: #27ae60; }
         .cm-dropzone.wrong-flash { background: #e74c3c !important; color: white; border-color: #c0392b; }
 
-        /* Spot the Hazard Interface Styling */
         .hazard-card-box {
-            border-left: 5px solid #e67e22; /* High contrast hazard alert accent line */
+            border-left: 5px solid #e67e22;
         }
         .sh-dropdown {
             width: 100%;
@@ -307,6 +384,180 @@
             font-style: italic;
             padding: 10px 0;
         }
+        .profile-settings-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-top: 20px;
+            max-width: 600px;
+        }
+        .stats-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .stat-box {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .stat-box h4 {
+            margin: 0 0 8px 0;
+            color: #0f172a;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2563eb;
+        }
+        .stat-label {
+            color: #64748b;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .module-progress-list {
+            margin-top: 18px;
+            display: grid;
+            gap: 10px;
+        }
+        .module-progress-item {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fff;
+        }
+        .module-progress-item strong {
+            display: block;
+            margin-bottom: 6px;
+        }
+        .dashboard-wrapper {
+            display: grid;
+            grid-template-columns: 400px 1.8fr;
+            gap: 25px;
+            align-items: start;
+        }
+        .events-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 100%;
+        }
+        .events-card h3 {
+            margin-top: 0;
+            color: #0f172a;
+        }
+        .event-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .event-item {
+            border-left: 4px solid #3b82f6;
+            background: #f0f9ff;
+            padding: 12px;
+            border-radius: 6px;
+        }
+        .event-item.completed {
+            border-left-color: #10b981;
+            background: #f0fdf4;
+        }
+        .event-item.in-progress {
+            border-left-color: #f59e0b;
+            background: #fffbf0;
+        }
+        .event-time {
+            font-size: 12px;
+            color: #64748b;
+        }
+        .event-title {
+            font-weight: bold;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .event-desc {
+            font-size: 13px;
+            color: #475569;
+        }
+        .no-events {
+            color: #94a3b8;
+            font-style: italic;
+            padding: 20px;
+            text-align: center;
+        }
+        @media (max-width: 1200px) {
+            .dashboard-wrapper {
+                grid-template-columns: 1fr;
+            }
+        }
+        .profile-settings-card h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .profile-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 15px;
+        }
+        .profile-form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .profile-form-group label {
+            font-weight: bold;
+            color: #34495e;
+        }
+        .profile-form-group input,
+        .profile-form-group select {
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .profile-form-actions {
+            margin-top: 15px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .profile-form-actions button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .profile-message {
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .profile-message.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .profile-message.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        @media (max-width: 700px) {
+            .profile-form-grid {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -318,22 +569,153 @@
         <button id="btn-conveyor" class="nav-btn" onclick="switchView('conveyor')">Conveyor Mania</button>
         <button id="btn-hazard" class="nav-btn" onclick="switchView('hazard')">Spot the Hazard</button>
         <button id="btn-modules" class="nav-btn" onclick="switchView('modules')">Modules</button>
+        <button id="btn-profile" class="nav-btn profile-btn" onclick="switchView('profile')">Profile Settings</button>
         <a href="logout.php" class="logout-btn">Logout</a>
     </div>
 
     <div class="main-content">
 
         <div id="view-dashboard" class="app-view active">
-            <div class="test-panel">
-                <h2>Student Dashboard Profile</h2>
-                <div class="profile-circle"><?php echo $initials; ?></div>
-                <div class="data-row"><span class="label">Full Name:</span> <?php echo htmlspecialchars(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')); ?></div>
-                <div class="data-row"><span class="label">Gender:</span> <?php echo htmlspecialchars($user['gender'] ?? 'Not Set'); ?></div>
-                <div class="data-row">
-                    <span class="label">System Difficulty:</span> 
-                    <span style="color: green; font-weight: bold;"><?php echo strtoupper(htmlspecialchars($user['current_difficulty'] ?? 'EASY')); ?></span>
+            <div class="dashboard-wrapper">
+                <div>
+                    <div class="test-panel">
+                        <h2>Student Dashboard Profile</h2>
+                        <div class="profile-circle"><?php echo $initials; ?></div>
+                        <div class="data-row"><span class="label">Full Name:</span> <?php echo htmlspecialchars(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')); ?></div>
+                        <div class="data-row"><span class="label">Gender:</span> <?php echo htmlspecialchars($user['gender'] ?? 'Not Set'); ?></div>
+                        <div class="data-row">
+                            <span class="label">System Difficulty:</span> 
+                            <span style="color: green; font-weight: bold;"><?php echo strtoupper(htmlspecialchars($user['current_difficulty'] ?? 'EASY')); ?></span>
+                        </div>
+                        <div class="data-row"><span class="label">User ID (Session):</span> <?php echo $_SESSION['user_id']; ?></div>
+                    </div>
                 </div>
-                <div class="data-row"><span class="label">User ID (Session):</span> <?php echo $_SESSION['user_id']; ?></div>
+
+                <div>
+                    <div class="events-card">
+                        <h3>Upcoming Events</h3>
+                        <div class="event-list">
+                            <?php 
+                                $events = [];
+                                try {
+                                    $events_stmt = $conn->prepare("SELECT event_id, title, description, event_date, status FROM events WHERE status = 'active' ORDER BY event_date ASC LIMIT 10");
+                                    $events_stmt->execute();
+                                    $events = $events_stmt->fetchAll(PDO::FETCH_ASSOC);
+                                } catch (PDOException $e) {
+                                    $events = [];
+                                }
+
+                                if (!empty($events)):
+                                    foreach ($events as $event):
+                                        $is_upcoming = strtotime($event['event_date']) > time();
+                                        $event_class = $is_upcoming ? 'in-progress' : 'completed';
+                                        $event_date = date('M d, Y g:i A', strtotime($event['event_date']));
+                                ?>
+                                        <div class="event-item <?php echo $event_class; ?>">
+                                            <div class="event-title"><?php echo htmlspecialchars($event['title']); ?></div>
+                                            <div class="event-desc"><?php echo htmlspecialchars($event['description']); ?></div>
+                                            <div class="event-time"><?php echo $event_date; ?></div>
+                                        </div>
+                                <?php 
+                                    endforeach;
+                                else:
+                            ?>
+                                    <div class="no-events">No upcoming events. Check back later!</div>
+                            <?php 
+                                endif;
+                            ?>
+                        </div>
+                    </div>
+
+                    <div class="stats-card" style="margin-top: 25px;">
+                        <h3>Your Progress Statistics</h3>
+                        <div class="stats-grid">
+                            <div class="stat-box">
+                                <h4>Memory Game</h4>
+                                <div class="stat-value"><?php echo intval($memory_progress['percent']); ?>%</div>
+                                <div class="stat-label"><?php echo intval($memory_progress['is_completed']) ? 'Completed' : 'In progress'; ?></div>
+                            </div>
+                            <div class="stat-box">
+                                <h4>Conveyor Mania</h4>
+                                <div class="stat-value"><?php echo intval($conveyor_progress['percent']); ?>%</div>
+                                <div class="stat-label"><?php echo intval($conveyor_progress['is_completed']) ? 'Completed' : 'In progress'; ?></div>
+                            </div>
+                            <div class="stat-box">
+                                <h4>Spot the Hazard</h4>
+                                <div class="stat-value"><?php echo intval($hazard_progress_percent); ?>%</div>
+                                <div class="stat-label"><?php echo $hazard_completed_count; ?> of <?php echo $hazard_total_levels; ?> levels completed</div>
+                            </div>
+                            <div class="stat-box">
+                                <h4>Learning Modules</h4>
+                                <div class="stat-value"><?php echo intval($module_stats['completed']); ?>/<?php echo intval($module_stats['total']); ?></div>
+                                <div class="stat-label">completed modules</div>
+                            </div>
+                        </div>
+
+                        <?php if (!empty($learning_modules)): ?>
+                            <div class="module-progress-list">
+                                <h4 style="margin: 0 0 8px 0; color: #0f172a;">Module Progress</h4>
+                                <?php foreach ($learning_modules as $module): ?>
+                                    <div class="module-progress-item">
+                                        <strong><?php echo htmlspecialchars($module['title']); ?></strong>
+                                        <div class="progress-container" style="margin-bottom: 6px;">
+                                            <div class="module-progress-fill" style="width: <?php echo intval($module['progress_percent']); ?>%;"></div>
+                                            <div class="module-progress-text"><?php echo intval($module['progress_percent']); ?>%</div>
+                                        </div>
+                                        <span style="font-size: 12px; color: <?php echo intval($module['is_completed']) ? '#16a34a' : '#7f9cf5'; ?>; font-weight: bold;">
+                                            <?php echo intval($module['is_completed']) ? 'Completed' : 'In progress'; ?>
+                                        </span>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-profile" class="app-view">
+            <div class="profile-settings-card">
+                <h3>Profile Settings</h3>
+                <?php if ($profile_message !== ''): ?>
+                    <div class="profile-message <?php echo htmlspecialchars($profile_message_type); ?>">
+                        <?php echo htmlspecialchars($profile_message); ?>
+                    </div>
+                <?php endif; ?>
+                <form method="POST" action="">
+                    <input type="hidden" name="update_profile" value="1">
+                    <div class="profile-form-grid">
+                        <div class="profile-form-group">
+                            <label for="first_name">First Name</label>
+                            <input type="text" id="first_name" name="first_name" value="<?php echo htmlspecialchars($profile_form['first_name']); ?>" required>
+                        </div>
+                        <div class="profile-form-group">
+                            <label for="last_name">Last Name</label>
+                            <input type="text" id="last_name" name="last_name" value="<?php echo htmlspecialchars($profile_form['last_name']); ?>" required>
+                        </div>
+                        <div class="profile-form-group">
+                            <label for="gender">Gender</label>
+                            <select id="gender" name="gender">
+                                <option value="" <?php echo ($profile_form['gender'] === '' ? 'selected' : ''); ?>>Select</option>
+                                <option value="Male" <?php echo ($profile_form['gender'] === 'Male' ? 'selected' : ''); ?>>Male</option>
+                                <option value="Female" <?php echo ($profile_form['gender'] === 'Female' ? 'selected' : ''); ?>>Female</option>
+                                <option value="Other" <?php echo ($profile_form['gender'] === 'Other' ? 'selected' : ''); ?>>Other</option>
+                            </select>
+                        </div>
+                        <div class="profile-form-group">
+                            <label for="phone">Phone Number</label>
+                            <input type="text" id="phone" name="phone" value="<?php echo htmlspecialchars($profile_form['phone']); ?>">
+                        </div>
+                        <div class="profile-form-group" style="grid-column: 1 / -1;">
+                            <label for="birthday">Birthday</label>
+                            <input type="date" id="birthday" name="birthday" value="<?php echo htmlspecialchars($profile_form['birthday']); ?>">
+                        </div>
+                    </div>
+                    <div class="profile-form-actions">
+                        <button type="submit">Save Profile</button>
+                        <span style="color: #6c757d; font-size: 13px;">Your name will be updated instantly.</span>
+                    </div>
+                </form>
             </div>
         </div>
 
@@ -356,9 +738,37 @@
                     <label for="mg-user-input" style="display: block; font-weight: bold; margin-bottom: 8px;">Type the Plate Number:</label>
                     <input type="text" id="mg-user-input" placeholder="ABC-1234" autocomplete="off" style="padding: 12px; font-size: 24px; font-weight: bold; text-align: center; text-transform: uppercase; letter-spacing: 2px; width: 80%; max-width: 300px; border: 2px solid #ced4da; border-radius: 6px;">
                 </div>
-                <div id="mg-feedback" class="mg-feedback info">Click Start to begin!</div>
+                <div id="mg-medium-builder" style="display: none; margin: 20px 0; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; text-align: center;">
+                    <div style="font-weight: bold; margin-bottom: 12px;">Choose the Exact Plate Parts</div>
+                    <div style="margin-bottom: 10px; font-size: 13px; color: #475569;">Find the exact letter group and exact number group that match the plate number you saw.</div>
+                    <div id="mg-builder-slot-label" style="margin-bottom: 10px; font-size: 13px; color: #1d4ed8; font-weight: bold;">Active selection: Letter group</div>
+                    <div style="display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 16px 0;">
+                        <div id="mg-letter-slots" style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;"></div>
+                        <div id="mg-number-slots" style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;"></div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 8px;">Letters</div>
+                            <div id="mg-letter-options" style="display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;"></div>
+                        </div>
+                        <div>
+                            <div style="font-weight: bold; margin-bottom: 8px;">Numbers</div>
+                            <div id="mg-number-options" style="display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin: 12px 0 8px 0; text-align: center;">
+                    <label for="mg-difficulty-select" style="display: block; font-weight: bold; margin-bottom: 6px;">Select Mode</label>
+                    <select id="mg-difficulty-select" style="padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1; min-width: 220px; text-align: center;">
+                        <option value="">Choose Easy / Medium / Hard</option>
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                    </select>
+                </div>
+                <div id="mg-feedback" class="mg-feedback info">Choose a mode to begin the Memory Game.</div>
                 <div class="game-controls">
-                    <button id="mg-start-btn">Start Game</button>
+                    <button id="mg-start-btn" disabled>Start Game</button>
                     <button id="mg-complete-btn" disabled>Submit Answer</button>
                     <button id="mg-next-level-btn" style="display: none;">Next Level</button>
                 </div>
@@ -471,6 +881,8 @@
                 </div>
             </div>
         </div>
+
+        
 
     </div>
 

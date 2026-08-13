@@ -1,0 +1,286 @@
+/* ==========================================================================
+   RoadRanger Auth Theme
+   Palette: hazard yellow + asphalt dark, caution-tape signature, lane-line
+   texture. Typography: Oswald (signage) / Inter (body) / IBM Plex Mono (data).
+   ========================================================================== */
+
+:root {
+    --hazard-yellow:      #FFC53D;
+    --hazard-yellow-deep: #E8A400;
+    --asphalt:            #202023;
+    --asphalt-mid:        #2E2E33;
+    --roadline-white:     #FBFAF5;
+    --caution-black:      #17171A;
+    --signal-red:         #C1121F;
+    --signal-red-bg:      #FBE9E7;
+    --go-green:           #2E7D32;
+    --go-green-bg:        #E9F5EA;
+    --font-display: 'Oswald', 'Arial Narrow', sans-serif;
+    --font-body:    'Inter', 'Segoe UI', sans-serif;
+    --font-mono:    'IBM Plex Mono', 'Consolas', monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: var(--font-body);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 24px;
+    min-height: 100vh;
+    margin: 0;
+    background-color: var(--asphalt);
+    background-image:
+        repeating-linear-gradient(
+            115deg,
+            transparent 0px,
+            transparent 64px,
+            rgba(255, 197, 61, 0.07) 64px,
+            rgba(255, 197, 61, 0.07) 96px
+        );
+    background-attachment: fixed;
+}
+
+.auth-container {
+    position: relative;
+    overflow: hidden;
+    background: var(--roadline-white);
+    padding: 44px 40px 40px;
+    border-radius: 4px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    width: 100%;
+    max-width: 440px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Signature element: a caution-tape strip along the top edge of the card */
+.hazard-strip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 10px;
+    background: repeating-linear-gradient(
+        -45deg,
+        var(--caution-black),
+        var(--caution-black) 14px,
+        var(--hazard-yellow) 14px,
+        var(--hazard-yellow) 28px
+    );
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 28px;
+}
+
+.header-badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    color: var(--hazard-yellow-deep);
+    background: var(--caution-black);
+    padding: 4px 10px;
+    border-radius: 2px;
+    margin-bottom: 14px;
+}
+
+.header h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--caution-black);
+    margin: 0 0 4px;
+    font-size: 30px;
+}
+
+.header p {
+    color: #8a8a8f;
+    font-size: 13.5px;
+    margin: 0;
+}
+
+/* Tabs styled like a two-lane road sign toggle, active lane marked with a
+   dashed underline echoing a painted lane divider */
+.tabs {
+    display: flex;
+    margin-bottom: 28px;
+    border-bottom: 3px dashed #e3e0d6;
+}
+
+.tab {
+    flex: 1;
+    text-align: center;
+    padding: 13px;
+    cursor: pointer;
+    font-family: var(--font-display);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 14px;
+    color: #a3a3a8;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -3px;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.tab.active {
+    border-bottom: 3px solid var(--hazard-yellow-deep);
+    color: var(--caution-black);
+}
+
+.tab:hover {
+    color: var(--caution-black);
+}
+
+form { display: none; flex-direction: column; }
+form.active { display: flex; }
+
+label {
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    margin-bottom: 6px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #55555a;
+}
+
+input, select {
+    margin-bottom: 15px;
+    padding: 12px 13px;
+    border: 1.5px solid #e3e0d6;
+    border-radius: 3px;
+    font-size: 14.5px;
+    font-family: var(--font-body);
+    background: #fff;
+    color: var(--caution-black);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: var(--hazard-yellow-deep);
+    box-shadow: 0 0 0 3px rgba(232, 164, 0, 0.22);
+}
+
+button.primary {
+    padding: 13px;
+    background: var(--hazard-yellow);
+    color: var(--caution-black);
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: var(--font-display);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 15px;
+    transition: background 0.2s ease, transform 0.15s ease;
+    margin-bottom: 6px;
+}
+
+button.primary:hover {
+    background: var(--hazard-yellow-deep);
+    transform: translateY(-2px);
+}
+
+button.primary:active {
+    transform: translateY(0);
+}
+
+/* Alerts: warning-sign style, colored left rule instead of a filled block */
+.alert {
+    padding: 12px 14px;
+    border-radius: 3px;
+    margin-bottom: 20px;
+    font-size: 13.5px;
+    line-height: 1.4;
+    border-left: 4px solid transparent;
+}
+
+.alert-error {
+    background-color: var(--signal-red-bg);
+    color: #8e1116;
+    border-left-color: var(--signal-red);
+}
+
+.alert-success {
+    background-color: var(--go-green-bg);
+    color: #1e5c24;
+    border-left-color: var(--go-green);
+}
+
+.terms-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.terms-container input {
+    margin-bottom: 0;
+    width: auto;
+    accent-color: var(--hazard-yellow-deep);
+}
+
+.terms-container label {
+    margin-bottom: 0;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 12.5px;
+    color: #6b6b70;
+}
+
+.method-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.method-btn {
+    flex: 1;
+    padding: 9px;
+    font-family: var(--font-body);
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border: 1.5px solid #e3e0d6;
+    border-radius: 3px;
+    background: #fff;
+    cursor: pointer;
+    text-align: center;
+    color: #6b6b70;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.method-btn.active {
+    background: var(--caution-black);
+    color: var(--hazard-yellow);
+    border-color: var(--caution-black);
+}
+
+.password-field-wrapper {
+    display: flex;
+    flex-direction: column;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button.primary { transition: none; }
+}
+
+@media (max-width: 480px) {
+    .auth-container {
+        padding: 36px 24px 30px;
+    }
+
+    .header h1 {
+        font-size: 26px;
+    }
+}

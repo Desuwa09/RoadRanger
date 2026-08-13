@@ -2,7 +2,7 @@
 session_start();
 require_once __DIR__ . '/../../db/db_con.php';
 
-// If the user is not logged in or is not an admin, redirect them immediately to the correct login page location
+
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESSION['is_admin'] !== 1) {
     header('Location: pages/login.php');
     exit;
@@ -12,7 +12,27 @@ $db_connection = db_connect();
 $feedback_message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_action'])) {
-    // 1. MODULE SAVE PIPELINE
+    
+    if ($_POST['form_action'] === 'create_event') {
+        $event_title = trim($_POST['event_title'] ?? '');
+        $event_desc = trim($_POST['event_description'] ?? '');
+        $event_date = trim($_POST['event_date'] ?? '');
+        
+        if ($event_title === '' || $event_date === '') {
+            $feedback_message = "<div class='bg-red-100 border border-red-300 text-red-800 p-3 rounded mb-4 font-medium text-xs'>Error: Event title and date are required.</div>";
+        } else {
+            try {
+                $insert_event_sql = "INSERT INTO events (admin_id, title, description, event_date, status) VALUES (?, ?, ?, ?, 'active')";
+                $run_event_insert = $db_connection->prepare($insert_event_sql);
+                $run_event_insert->execute([$_SESSION['user_id'], $event_title, $event_desc, $event_date]);
+                $feedback_message = "<div class='bg-green-100 border border-green-300 text-green-800 p-3 rounded mb-4 font-medium text-xs'>Success: Event has been created and posted to all users!</div>";
+            } catch (PDOException $ex) {
+                $feedback_message = "<div class='bg-red-100 border border-red-300 text-red-800 p-3 rounded mb-4 font-medium text-xs'>Database Error: " . $ex->getMessage() . "</div>";
+            }
+        }
+    }
+
+    
     if ($_POST['form_action'] === 'save_generated_tree') {
         $ch_num = (int)$_POST['chapter_number'];
         $mod_title = trim($_POST['title']);
@@ -29,11 +49,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_action'])) {
         }
     }
 
-    // 2. GAME DELETION PIPELINE (TARGETING LEVEL_ID)
+    
     if ($_POST['form_action'] === 'delete_game' && isset($_POST['level_id'])) {
         $target_level_id = (int)$_POST['level_id'];
         try {
-            // Deletes from game_levels, cascading down to automatically clean game_items via constraints
+            
             $delete_sql = "DELETE FROM game_levels WHERE level_id = ?";
             $run_delete = $db_connection->prepare($delete_sql);
             $run_delete->execute([$target_level_id]);
@@ -43,11 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_action'])) {
         }
     }
 
-    // 2b. MODULE DELETION PIPELINE (TARGETING MODULE_ID)
+    
     if ($_POST['form_action'] === 'delete_module' && isset($_POST['module_id'])) {
         $target_module_id = (int)$_POST['module_id'];
         try {
-            // Clean up module progress before removing the module record
+            
             $cleanup_sql = "DELETE FROM progress WHERE module_id = ? AND game_name = 'learning_module'";
             $cleanup_stmt = $db_connection->prepare($cleanup_sql);
             $cleanup_stmt->execute([$target_module_id]);
@@ -137,21 +157,21 @@ try {
     $feedback_message = "<div class='bg-amber-100 text-amber-800 p-3 rounded text-xs mb-4'>Notice: Syncing live schema parameters.</div>";
 }
 
-// 3. SELECT QUERY FOR THE CANVAS GAMES LIST
+
 $active_games_list = [];
 $learning_modules_list = [];
 try {
     $games_stmt = $db_connection->query("SELECT level_id, title, description, created_at FROM game_levels ORDER BY level_id DESC");
     $active_games_list = $games_stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    // Graceful fallback
+    
 }
 
 try {
     $module_stmt = $db_connection->query("SELECT module_id, chapter_number, title, description, created_at FROM learning_modules ORDER BY chapter_number ASC, module_id DESC");
     $learning_modules_list = $module_stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    // Graceful fallback for learning modules
+    
 }
 
 $monthly_events = [];
@@ -193,6 +213,10 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                     <span> Dashboard</span>
                 </a>
                 
+                <a href="?tab=view-events" id="btn-events" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded text-xs transition duration-150 <?php echo $active_admin_tab === 'view-events' ? 'font-bold bg-slate-700 text-amber-400' : 'font-semibold text-slate-400 hover:bg-slate-700 hover:text-white'; ?>">
+                    <span> Event Planner</span>
+                </a>
+                
                 <a href="?tab=view-modules" id="btn-modules" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded text-xs transition duration-150 <?php echo $active_admin_tab === 'view-modules' ? 'font-bold bg-slate-700 text-amber-400' : 'font-semibold text-slate-400 hover:bg-slate-700 hover:text-white'; ?>">
                     <span> Module Creation Companion</span>
                 </a>
@@ -209,7 +233,6 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
         <main class="flex-1 p-8">
             <?php echo $feedback_message; ?>
 
-            <!-- VIEW ANALYTICS INTERFACE -->
             <div id="view-analytics" class="view-panel space-y-6 <?php echo $active_admin_tab !== 'view-analytics' ? 'hidden' : ''; ?>">
                 <div class="flex justify-between items-center border-b border-slate-200 pb-3">
                     <div>
@@ -237,8 +260,8 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                         <h3 class="text-2xl font-black text-slate-800 mt-1"><?php echo $gender_female; ?> <span class="text-xs font-normal text-slate-400">users</span></h3>
                     </div>
                     <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
-                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Target Month Context Event</p>
-                        <p class="text-[11px] font-bold text-amber-600 wrap mt-2" title="<?php echo htmlspecialchars($active_event_notice); ?>"><?php echo htmlspecialchars($active_event_notice); ?></p>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Event Planner</p>
+                        <p class="text-[11px] font-bold text-amber-600 wrap mt-2">Create and manage upcoming events for users</p>
                     </div>
                 </div>
 
@@ -271,7 +294,77 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                 </div>
             </div>
 
-            <!-- VIEW MODULES INTERFACE -->
+            <div id="view-events" class="view-panel space-y-6 <?php echo $active_admin_tab !== 'view-events' ? 'hidden' : ''; ?>">
+                <div>
+                    <h2 class="text-lg font-black text-slate-900 tracking-tight">Event Planner</h2>
+                    <p class="text-xs text-slate-500 font-medium">Create and manage events that will appear on user dashboards.</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-black text-slate-800 uppercase tracking-wide mb-4">Create New Event</h3>
+                        <form method="POST" action="" class="space-y-4">
+                            <input type="hidden" name="form_action" value="create_event">
+                            
+                            <div>
+                                <label for="event_title" class="block text-xs font-bold text-slate-600 mb-1">Event Title</label>
+                                <input type="text" id="event_title" name="event_title" placeholder="e.g., Traffic Safety Seminar" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500" required>
+                            </div>
+                            
+                            <div>
+                                <label for="event_description" class="block text-xs font-bold text-slate-600 mb-1">Description</label>
+                                <textarea id="event_description" name="event_description" placeholder="Event details..." rows="3" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500"></textarea>
+                            </div>
+                            
+                            <div>
+                                <label for="event_date" class="block text-xs font-bold text-slate-600 mb-1">Date & Time</label>
+                                <input type="datetime-local" id="event_date" name="event_date" class="w-full px-3 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500" required>
+                            </div>
+                            
+                            <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-2 rounded-md transition">Create Event</button>
+                        </form>
+                    </div>
+
+                    <div class="lg:col-span-2 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                        <h3 class="text-sm font-black text-slate-800 uppercase tracking-wide mb-4">Upcoming Events</h3>
+                        <div class="space-y-3">
+                            <?php 
+                                try {
+                                    $events_list_stmt = $db_connection->prepare("SELECT event_id, title, description, event_date, status FROM events WHERE status = 'active' ORDER BY event_date ASC LIMIT 20");
+                                    $events_list_stmt->execute();
+                                    $events_list = $events_list_stmt->fetchAll(PDO::FETCH_ASSOC);
+                                    
+                                    if (!empty($events_list)):
+                                        foreach ($events_list as $event):
+                                            $event_date_formatted = date('M d, Y g:i A', strtotime($event['event_date']));
+                                            $is_upcoming = strtotime($event['event_date']) > time();
+                            ?>
+                                            <div class="border border-slate-200 rounded-lg p-3 <?php echo $is_upcoming ? 'bg-amber-50' : 'bg-slate-50'; ?>">
+                                                <div class="flex justify-between items-start">
+                                                    <div class="flex-1">
+                                                        <h4 class="text-sm font-bold text-slate-800"><?php echo htmlspecialchars($event['title']); ?></h4>
+                                                        <p class="text-xs text-slate-600 mt-1"><?php echo htmlspecialchars($event['description']); ?></p>
+                                                        <p class="text-[11px] text-slate-500 font-semibold mt-2"><?php echo $event_date_formatted; ?></p>
+                                                    </div>
+                                                    <span class="text-[10px] font-bold px-2 py-1 rounded <?php echo $is_upcoming ? 'bg-amber-200 text-amber-800' : 'bg-slate-200 text-slate-800'; ?>"><?php echo $is_upcoming ? 'Upcoming' : 'Past'; ?></span>
+                                                </div>
+                                            </div>
+                            <?php 
+                                        endforeach;
+                                    else:
+                            ?>
+                                        <p class="text-xs text-slate-500 italic text-center py-6">No events created yet. Create one to get started!</p>
+                            <?php 
+                                    endif;
+                                } catch (PDOException $e) {
+                                    echo "<p class='text-xs text-red-600'>Error loading events: " . htmlspecialchars($e->getMessage()) . "</p>";
+                                }
+                            ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="view-modules" class="view-panel space-y-6 <?php echo $active_admin_tab !== 'view-modules' ? 'hidden' : ''; ?>">
                 <div>
                     <h2 class="text-lg font-black text-slate-900 tracking-tight">Interactive Dialogue Tree Configuration Workspace</h2>
@@ -376,7 +469,6 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
             </div>
         </div>
 
-            <!-- VIEW GAMES INTERFACE -->
             <div id="view-games" class="view-panel space-y-6 <?php echo $active_admin_tab !== 'view-games' ? 'hidden' : ''; ?>">
                 <div class="flex justify-between items-center border-b border-slate-200 pb-3">
                     <div>

@@ -286,7 +286,6 @@
       });
     });
 
-    // Pointer drag fallback
     refs.sign.addEventListener("pointerdown", (event) => {
       beginPointerDrag(event);
     });
@@ -331,7 +330,6 @@
     const initialActive = document.getElementById("view-conveyor")?.classList.contains("active");
     activateSection(Boolean(initialActive));
 
-    // Linked structure to read views changes from dashboard panel
     window.addEventListener("learnTab:sectionChanged", (event) => {
       const activeSection = event?.detail?.sectionId === "conveyor";
       activateSection(activeSection);

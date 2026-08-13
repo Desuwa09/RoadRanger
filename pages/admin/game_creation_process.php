@@ -16,7 +16,6 @@ try {
     $difficulty = $_POST['difficulty'] ?? 'easy';
     $hotspots_json = $_POST['hotspots_data'] ?? '[]';
 
-    // 1. Fetch the master game_id for 'hotspot_test'
     $game_stmt = $conn->prepare("SELECT game_id FROM games WHERE game_key = 'hotspot_test'");
     $game_stmt->execute();
     $game_result = $game_stmt->get_result();
@@ -28,7 +27,6 @@ try {
         throw new Exception("Master game type tracking configuration not initialized.");
     }
 
-    // 2. Handle Scenario Background Image Upload
     if (!isset($_FILES['scenario_image']) || $_FILES['scenario_image']['error'] !== UPLOAD_ERR_OK) {
         throw new Exception("Please upload a valid scenario background image.");
     }
@@ -56,7 +54,6 @@ try {
 
     $relative_db_path = "../../assets/imgs/Scenarios/" . $unique_filename;
 
-    // 3. Insert record into game_levels
     $level_stmt = $conn->prepare("INSERT INTO game_levels (game_id, title, description, difficulty, background_image) VALUES (?, ?, ?, ?, ?)");
     $level_stmt->bind_param("issss", $game_id, $title, $description, $difficulty, $relative_db_path);
     
@@ -66,7 +63,6 @@ try {
     $new_level_id = $conn->insert_id;
     $level_stmt->close();
 
-    // 4. Decode drawn data arrays and insert into game_items
     $items_array = json_decode($hotspots_json, true);
     if (!is_array($items_array) || count($items_array) === 0) {
         throw new Exception("No active violation zones mapped on the canvas environment.");

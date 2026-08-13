@@ -16,71 +16,105 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     try {
         $scenario_name = trim($_POST['scenario_name'] ?? '');
         $description = trim($_POST['description'] ?? '');
-        $difficulty = $_POST['difficulty'] ?? 'easy';
-        $hotspots_json = $_POST['hotspots_data'] ?? '[]'; 
+        $selected_game_key = trim($_POST['game_key'] ?? 'hotspot_test');
+        $difficulty = strtolower(trim($_POST['difficulty'] ?? 'easy'));
+        $difficulty = in_array($difficulty, ['easy', 'medium', 'hard'], true) ? $difficulty : 'easy';
+        $time_limit_seconds = max(0, (int)($_POST['time_limit_seconds'] ?? 0));
+        $hotspots_json = $_POST['hotspots_data'] ?? '[]';
 
-        if (empty($scenario_name) || !isset($_FILES['scenario_image']) || $_FILES['scenario_image']['error'] !== UPLOAD_ERR_OK) {
-            throw new Exception("Please fill out the scenario title and upload a valid image.");
+        if (empty($scenario_name)) {
+            throw new Exception("Please fill out the level title.");
         }
 
-        $game_stmt = $conn->prepare("SELECT game_id FROM games WHERE game_key = 'hotspot_test' LIMIT 1");
-        $game_stmt->execute();
+        $game_stmt = $conn->prepare("SELECT game_id, game_name FROM games WHERE game_key = ? LIMIT 1");
+        $game_stmt->execute([$selected_game_key]);
         $game_data = $game_stmt->fetch(PDO::FETCH_ASSOC);
         $game_id = $game_data['game_id'] ?? null;
 
         if (!$game_id) {
-            throw new Exception("Master game tracking record ('hotspot_test') was not initialized.");
+            throw new Exception("Selected game type was not initialized in the master games table.");
         }
 
-        $file_tmp = $_FILES['scenario_image']['tmp_name'];
-        $file_name = basename($_FILES['scenario_image']['name']);
-        $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
-        
-        $allowed_exts = ['jpg', 'jpeg', 'png', 'webp'];
-        if (!in_array($file_ext, $allowed_exts)) {
-            throw new Exception("Invalid image extension.");
+        $relative_db_path = null;
+        if ($selected_game_key === 'hotspot_test') {
+            if (!isset($_FILES['scenario_image']) || $_FILES['scenario_image']['error'] !== UPLOAD_ERR_OK) {
+                throw new Exception("Please upload a valid image for the hotspot scenario.");
+            }
+
+            $file_tmp = $_FILES['scenario_image']['tmp_name'];
+            $file_name = basename($_FILES['scenario_image']['name']);
+            $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+
+            $allowed_exts = ['jpg', 'jpeg', 'png', 'webp'];
+            if (!in_array($file_ext, $allowed_exts)) {
+                throw new Exception("Invalid image extension.");
+            }
+
+            $upload_dir = __DIR__ . '/../../assets/imgs/Scenarios/';
+            if (!is_dir($upload_dir)) {
+                mkdir($upload_dir, 0777, true);
+            }
+
+            $unique_filename = uniqid('scenario_', true) . '.' . $file_ext;
+            $target_path = $upload_dir . $unique_filename;
+
+            if (!move_uploaded_file($file_tmp, $target_path)) {
+                throw new Exception("Failed to save image.");
+            }
+
+            $relative_db_path = "../../assets/imgs/Scenarios/" . $unique_filename;
+        } elseif (isset($_FILES['scenario_image']) && $_FILES['scenario_image']['error'] === UPLOAD_ERR_OK) {
+            $file_tmp = $_FILES['scenario_image']['tmp_name'];
+            $file_name = basename($_FILES['scenario_image']['name']);
+            $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+
+            $allowed_exts = ['jpg', 'jpeg', 'png', 'webp'];
+            if (!in_array($file_ext, $allowed_exts)) {
+                throw new Exception("Invalid image extension.");
+            }
+
+            $upload_dir = __DIR__ . '/../../assets/imgs/Scenarios/';
+            if (!is_dir($upload_dir)) {
+                mkdir($upload_dir, 0777, true);
+            }
+
+            $unique_filename = uniqid('scenario_', true) . '.' . $file_ext;
+            $target_path = $upload_dir . $unique_filename;
+
+            if (!move_uploaded_file($file_tmp, $target_path)) {
+                throw new Exception("Failed to save image.");
+            }
+
+            $relative_db_path = "../../assets/imgs/Scenarios/" . $unique_filename;
         }
 
-        $upload_dir = __DIR__ . '/../../assets/imgs/Scenarios/';
-        if (!is_dir($upload_dir)) {
-            mkdir($upload_dir, 0777, true);
-        }
-
-        $unique_filename = uniqid('scenario_', true) . '.' . $file_ext;
-        $target_path = $upload_dir . $unique_filename;
-
-        if (!move_uploaded_file($file_tmp, $target_path)) {
-            throw new Exception("Failed to save image.");
-        }
-
-        $relative_db_path = "../../assets/imgs/Scenarios/" . $unique_filename;
-
-        $level_stmt = $conn->prepare("INSERT INTO game_levels (game_id, title, description, difficulty, background_image) VALUES (?, ?, ?, ?, ?)");
-        $level_stmt->execute([$game_id, $scenario_name, $description, $difficulty, $relative_db_path]);
-        
+        $level_stmt = $conn->prepare("INSERT INTO game_levels (game_id, title, description, difficulty, background_image, time_limit_seconds) VALUES (?, ?, ?, ?, ?, ?)");
+        $level_stmt->execute([$game_id, $scenario_name, $description, $difficulty, $relative_db_path, $time_limit_seconds]);
         $new_level_id = $conn->lastInsertId();
 
-        $items_array = json_decode($hotspots_json, true);
-        if (!is_array($items_array) || count($items_array) === 0) {
-            throw new Exception("Please draw at least one target.");
-        }
+        if ($selected_game_key === 'hotspot_test') {
+            $items_array = json_decode($hotspots_json, true);
+            if (!is_array($items_array) || count($items_array) === 0) {
+                throw new Exception("Please draw at least one target.");
+            }
 
-        $item_stmt = $conn->prepare("INSERT INTO game_items (level_id, item_label, shape_type, pos_x, pos_y, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $item_stmt = $conn->prepare("INSERT INTO game_items (level_id, item_label, shape_type, pos_x, pos_y, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)");
 
-        foreach ($items_array as $item) {
-            $item_stmt->execute([
-                $new_level_id, 
-                trim($item['label'] ?? 'Violation'), 
-                $item['shape'] ?? 'rect', 
-                $item['x'], 
-                $item['y'], 
-                $item['w'], 
-                $item['h']
-            ]);
+            foreach ($items_array as $item) {
+                $item_stmt->execute([
+                    $new_level_id,
+                    trim($item['label'] ?? 'Violation'),
+                    $item['shape'] ?? 'rect',
+                    $item['x'],
+                    $item['y'],
+                    $item['w'],
+                    $item['h']
+                ]);
+            }
         }
 
         $conn->commit();
-        $message = "Successfully created new Scenario Hotspot Game!";
+        $message = "Successfully created new level for " . htmlspecialchars($game_data['game_name'] ?? $selected_game_key) . "!";
         $message_type = "success";
     } catch (Exception $e) {
         if ($conn->inTransaction()) {
@@ -103,9 +137,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         .form-group { margin-bottom: 15px; }
         label { font-weight: 600; display: block; margin-bottom: 5px; }
         input, textarea, select { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; }
+        .subtle-note { font-size: 12px; color: #64748b; margin-top: 6px; }
         .workspace-grid { display: grid; grid-template-columns: 1fr 320px; gap: 25px; margin-top: 20px; }
+        .simple-builder { display: none; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 18px; margin-top: 15px; }
         .canvas-wrapper { position: relative; background: #e2e8f0; border-radius: 6px; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; min-height: 400px; }
-        #canvas-container { position: relative; display: inline-block; cursor: crosshair; }
+        #canvas-container { 
+            position: relative; 
+            display: inline-block; 
+            cursor: crosshair; 
+            touch-action: none; 
+            user-select: none; 
+        }
         #scenery-img { display: block; max-width: 100%; height: auto; pointer-events: none; }
         #snip-overlay { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 5; display: none; }
         .hotspot-box { position: absolute; z-index: 2; border: 3px solid #ef4444; background: rgba(239, 68, 68, 0.3); pointer-events: none; }
@@ -120,6 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 </head>
 <body>
 <div class="container">
+    <a href="dashboard.php" style="text-decoration:none; color:#3b82f6; font-weight:bold;">&larr; Back to Admin Dashboard</a> 
     <h1>Game Creator Workspace</h1>
     <?php if (!empty($message)): ?>
         <div class="alert <?php echo $message_type; ?>"><?php echo htmlspecialchars($message); ?></div>
@@ -127,9 +170,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     <form action="game_creation.php" method="POST" enctype="multipart/form-data" id="main-creation-form">
         <input type="hidden" name="action" value="create_game">
         <input type="hidden" name="hotspots_data" id="hotspots_data" value="[]">
-        <div class="form-group"><label>Scenario Title:</label><input type="text" name="scenario_name" required></div>
+
+        <div class="form-group">
+            <label>Game Type:</label>
+            <select name="game_key" id="game_type_select" required>
+                <option value="hotspot_test">Hotspot / Scenario Game</option>
+                <option value="memory_game">Memory Game</option>
+                <option value="conveyor_game">Conveyor Mania</option>
+            </select>
+        </div>
+
+        <div class="form-group"><label>Level Title:</label><input type="text" name="scenario_name" required></div>
         <div class="form-group"><label>Description:</label><textarea name="description" rows="2"></textarea></div>
-        <div class="form-group"><label>Upload Image:</label><input type="file" id="scenario_image" name="scenario_image" accept="image/*" required></div>
+        <div class="form-group">
+            <label>Difficulty:</label>
+            <select name="difficulty" required>
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Time Limit (Seconds):</label>
+            <input type="number" name="time_limit_seconds" min="0" value="0" placeholder="Optional for memory or conveyor levels">
+        </div>
+        <div class="form-group"><label>Upload Image (optional for memory/conveyor):</label><input type="file" id="scenario_image" name="scenario_image" accept="image/*"></div>
+
+        <div id="simple-level-builder" class="simple-builder">
+            <p class="subtle-note">This builder is for memory and conveyor levels. You can add a title, description, difficulty, timing, and an optional image. The game data itself is handled later by the game engine.</p>
+        </div>
         
         <div id="creator-workspace" style="display: none;">
             <div class="toolbar">
@@ -149,28 +218,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     </div>
                 </div>
                 <div class="hotspot-sidebar">
-                    <button type="submit" style="background:#10b981; color:white; border:none; padding:12px; width:100%; border-radius:6px; cursor:pointer;">Save Scenario</button>
+                    <button type="submit" style="background:#10b981; color:white; border:none; padding:12px; width:100%; border-radius:6px; cursor:pointer;">Save Level</button>
                 </div>
             </div>
+        </div>
+
+        <div id="non-hotspot-save" style="display:none; margin-top:15px;">
+            <button type="submit" style="background:#10b981; color:white; border:none; padding:12px; width:100%; border-radius:6px; cursor:pointer;">Save Level</button>
         </div>
     </form>
 </div>
 <script>
-    const state = { hotspots: [], currentShape: 'rect', isDrawing: false, startX: 0, startY: 0, currentX: 0, currentY: 0, imgWidth: 0, imgHeight: 0, pendingHotspot: null };
+    const state = { 
+        hotspots: [], 
+        currentShape: 'rect', 
+        isDrawing: false, 
+        startX: 0, 
+        startY: 0, 
+        currentX: 0, 
+        currentY: 0, 
+        imgWidth: 0, 
+        imgHeight: 0, 
+        pendingHotspot: null,
+        animationFrameId: null 
+    };
+    
     const refs = { 
-        workspace: document.getElementById('creator-workspace'), sceneryImg: document.getElementById('scenery-img'), 
-        canvasContainer: document.getElementById('canvas-container'), snipOverlay: document.getElementById('snip-overlay'), 
-        fileInput: document.getElementById('scenario_image'), popup: document.getElementById('label-popup'), 
-        popupInput: document.getElementById('popup-input') 
+        workspace: document.getElementById('creator-workspace'), 
+        simpleBuilder: document.getElementById('simple-level-builder'),
+        nonHotspotSave: document.getElementById('non-hotspot-save'),
+        sceneryImg: document.getElementById('scenery-img'), 
+        canvasContainer: document.getElementById('canvas-container'), 
+        snipOverlay: document.getElementById('snip-overlay'), 
+        fileInput: document.getElementById('scenario_image'), 
+        popup: document.getElementById('label-popup'), 
+        popupInput: document.getElementById('popup-input'),
+        gameTypeSelect: document.getElementById('game_type_select')
     };
     const ctx = refs.snipOverlay.getContext('2d');
+
+    function syncGameBuilderMode() {
+        const selectedGame = refs.gameTypeSelect.value;
+        const isHotspot = selectedGame === 'hotspot_test';
+
+        refs.workspace.style.display = isHotspot ? 'block' : 'none';
+        refs.simpleBuilder.style.display = isHotspot ? 'none' : 'block';
+        refs.nonHotspotSave.style.display = isHotspot ? 'none' : 'block';
+
+        if (!isHotspot) {
+            refs.snipOverlay.style.display = 'none';
+            refs.popup.style.display = 'none';
+            return;
+        }
+
+        if (!refs.fileInput.files.length) {
+            refs.workspace.style.display = 'none';
+        }
+    }
+
+    refs.gameTypeSelect.addEventListener('change', syncGameBuilderMode);
 
     refs.fileInput.addEventListener('change', (e) => {
         if (!e.target.files.length) return;
         const reader = new FileReader();
         reader.onload = (e) => {
             refs.sceneryImg.src = e.target.result;
-            refs.workspace.style.display = 'block';
+            if (refs.gameTypeSelect.value === 'hotspot_test') {
+                refs.workspace.style.display = 'block';
+            }
             refs.sceneryImg.onload = () => {
                 state.imgWidth = refs.sceneryImg.clientWidth;
                 state.imgHeight = refs.sceneryImg.clientHeight;
@@ -188,30 +303,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('tool-' + t).classList.add('active');
     }
+    refs.canvasContainer.addEventListener('pointerdown', (e) => {
+        if (refs.popup.contains(e.target)) {
+            return; 
+        }
 
-    refs.canvasContainer.addEventListener('mousedown', (e) => {
         const b = refs.canvasContainer.getBoundingClientRect();
         state.isDrawing = true;
         state.startX = e.clientX - b.left;
         state.startY = e.clientY - b.top;
+        state.currentX = state.startX;
+        state.currentY = state.startY;
         refs.snipOverlay.style.display = 'block';
+        refs.canvasContainer.setPointerCapture(e.pointerId);
     });
-
-    window.addEventListener('mousemove', (e) => {
+    refs.canvasContainer.addEventListener('pointermove', (e) => {
         if (!state.isDrawing) return;
         const b = refs.canvasContainer.getBoundingClientRect();
         state.currentX = Math.max(0, Math.min(e.clientX - b.left, state.imgWidth));
         state.currentY = Math.max(0, Math.min(e.clientY - b.top, state.imgHeight));
-        drawMask();
+        if (!state.animationFrameId) {
+            state.animationFrameId = requestAnimationFrame(() => {
+                drawMask();
+                state.animationFrameId = null; 
+            });
+        }
     });
-
-    window.addEventListener('mouseup', () => {
+    refs.canvasContainer.addEventListener('pointerup', (e) => {
         if (!state.isDrawing) return;
         state.isDrawing = false;
+        refs.canvasContainer.releasePointerCapture(e.pointerId);
+
+        if (state.animationFrameId) {
+            cancelAnimationFrame(state.animationFrameId);
+            state.animationFrameId = null;
+        }
+
         const w = Math.abs(state.currentX - state.startX);
         const h = Math.abs(state.currentY - state.startY);
-        if (w < 5 || h < 5) { refs.snipOverlay.style.display = 'none'; return; }
-        state.pendingHotspot = { x: Math.min(state.startX, state.currentX), y: Math.min(state.startY, state.currentY), width: w, height: h, shape: state.currentShape };
+        
+        if (w < 5 || h < 5) { 
+            refs.snipOverlay.style.display = 'none'; 
+            return; 
+        }
+        
+        state.pendingHotspot = { 
+            x: Math.min(state.startX, state.currentX), 
+            y: Math.min(state.startY, state.currentY), 
+            width: w, 
+            height: h, 
+            shape: state.currentShape 
+        };
+        
         refs.popup.style.left = (state.pendingHotspot.x + 10) + 'px';
         refs.popup.style.top = state.pendingHotspot.y + 'px';
         refs.popup.style.display = 'block';
@@ -219,27 +362,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     function drawMask() {
         ctx.clearRect(0, 0, state.imgWidth, state.imgHeight);
+        
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.fillRect(0, 0, state.imgWidth, state.imgHeight);
-        const x = Math.min(state.startX, state.currentX), y = Math.min(state.startY, state.currentY);
-        const w = Math.abs(state.currentX - state.startX), h = Math.abs(state.currentY - state.startY);
+        
+        const x = Math.min(state.startX, state.currentX);
+        const y = Math.min(state.startY, state.currentY);
+        const w = Math.abs(state.currentX - state.startX);
+        const h = Math.abs(state.currentY - state.startY);
+        
         ctx.clearRect(x, y, w, h);
+        
         ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2; 
+        
         if (state.currentShape === 'circle') {
             ctx.beginPath();
             ctx.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, 2 * Math.PI);
             ctx.stroke();
-        } else { ctx.strokeRect(x, y, w, h); }
+        } else { 
+            ctx.strokeRect(x, y, w, h); 
+        }
     }
 
     function closePopupModal(save) {
         refs.popup.style.display = 'none';
         refs.snipOverlay.style.display = 'none';
+        
         if (save && state.pendingHotspot) {
             state.hotspots.push({
-                shape: state.pendingHotspot.shape, label: refs.popupInput.value || 'Violation',
-                x: (state.pendingHotspot.x / state.imgWidth) * 100, y: (state.pendingHotspot.y / state.imgHeight) * 100,
-                w: (state.pendingHotspot.width / state.imgWidth) * 100, h: (state.pendingHotspot.height / state.imgHeight) * 100
+                shape: state.pendingHotspot.shape, 
+                label: refs.popupInput.value || 'Violation',
+                x: (state.pendingHotspot.x / state.imgWidth) * 100, 
+                y: (state.pendingHotspot.y / state.imgHeight) * 100,
+                w: (state.pendingHotspot.width / state.imgWidth) * 100, 
+                h: (state.pendingHotspot.height / state.imgHeight) * 100
             });
             refs.popupInput.value = '';
         }
@@ -257,6 +414,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         });
         document.getElementById('hotspots_data').value = JSON.stringify(state.hotspots);
     }
+
+    syncGameBuilderMode();
 </script>
 </body>
 </html>
