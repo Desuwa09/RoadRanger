@@ -205,8 +205,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($source_image !== null) {
         $content_parts[] = array(
-            'inline_data' => array(
-                'mime_type' => $source_image['mime_type'],
+            'inlineData' => array(
+                'mimeType' => $source_image['mime_type'],
                 'data' => $source_image['data']
             )
         );
@@ -246,6 +246,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $result_data = json_decode($server_output, true);
     $ai_json_payload = null;
+
+    if (isset($result_data['error'])) {
+        $error_message = $result_data['error']['message'] ?? 'Unknown Gemini API error.';
+        $error_status = $result_data['error']['status'] ?? $http_status;
+        echo json_encode([
+            'error' => 'Gemini API Request Failed: ' . $error_message,
+            'status' => $error_status,
+            'debug_log' => $result_data
+        ]);
+        exit;
+    }
 
     if (is_array($result_data)) {
         if (isset($result_data['candidates'][0]['content']['parts'][0]['text'])) {
