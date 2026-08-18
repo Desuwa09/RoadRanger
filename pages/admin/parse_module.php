@@ -12,7 +12,56 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESS
     exit;
 }
 
-$gemini_key = "AIzaSyAZFvjyF_YEGKJcKO7CsjxOsGX61Xgzg7U"; 
+function load_local_env_file() {
+    $env_path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env';
+    if (!is_file($env_path)) {
+        return;
+    }
+
+    $lines = file($env_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return;
+    }
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || str_starts_with($trimmed, '#')) {
+            continue;
+        }
+
+        if (strpos($trimmed, '=') === false) {
+            continue;
+        }
+
+        [$name, $value] = explode('=', $trimmed, 2);
+        $name = trim($name);
+        $value = trim($value);
+
+        if ($value !== '' && preg_match('/^(".*"|\'.*\')$/', $value)) {
+            $value = substr($value, 1, -1);
+        }
+
+        if ($name !== '') {
+            putenv($name . '=' . $value);
+            $_ENV[$name] = $value;
+            $_SERVER[$name] = $value;
+        }
+    }
+}
+
+load_local_env_file();
+
+$gemini_key = getenv('GEMINI_API_KEY');
+if ($gemini_key === false || trim((string)$gemini_key) === '') {
+    $gemini_key = isset($_ENV['GEMINI_API_KEY']) ? $_ENV['GEMINI_API_KEY'] : '';
+}
+
+if (trim((string)$gemini_key) === '') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        echo json_encode(['error' => 'Gemini API key is not configured. Set the GEMINI_API_KEY environment variable before generating a module.']);
+        exit;
+    }
+}
 
 function normalize_inline_image_payload($image_data, $mime_type = 'image/png') {
     if (!is_string($image_data)) {
