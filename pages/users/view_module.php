@@ -189,8 +189,8 @@ function getStartNode() {
     return keys.length ? keys[0] : null;
 }
 
-function addChatMessage(text, sender) {
-    chatLog.push({ text, sender });
+function addChatMessage(text, sender, image = null) {
+    chatLog.push({ text, sender, image });
     renderChat();
 }
 
@@ -199,7 +199,23 @@ function renderChat() {
     chatLog.forEach(item => {
         const bubble = document.createElement('div');
         bubble.className = `message-bubble ${item.sender}`;
-        bubble.textContent = item.text;
+
+        if (item.text) {
+            bubble.textContent = item.text;
+        }
+
+        if (item.image) {
+            const imageEl = document.createElement('img');
+            imageEl.src = item.image;
+            imageEl.alt = 'Module illustration';
+            imageEl.style.display = 'block';
+            imageEl.style.maxWidth = '100%';
+            imageEl.style.marginTop = '12px';
+            imageEl.style.borderRadius = '14px';
+            imageEl.style.border = '1px solid rgba(148, 163, 184, 0.25)';
+            bubble.appendChild(imageEl);
+        }
+
         messageList.appendChild(bubble);
     });
     messageList.scrollTop = messageList.scrollHeight;
@@ -214,7 +230,7 @@ function renderNode(nodeKey) {
         return;
     }
 
-    addChatMessage(node.bot_message || 'No message available.', 'bot');
+    addChatMessage(node.bot_message || 'No message available.', 'bot', node.image || null);
     choicesEl.innerHTML = '';
 
     const choices = Array.isArray(node.choices) ? node.choices : [];

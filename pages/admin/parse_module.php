@@ -14,9 +14,42 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESS
 
 $gemini_key = "AIzaSyAZFvjyF_YEGKJcKO7CsjxOsGX61Xgzg7U"; 
 
+function normalize_inline_image_payload($image_data, $mime_type = 'image/png') {
+    if (!is_string($image_data)) {
+        return null;
+    }
+
+    $trimmed = trim($image_data);
+    if ($trimmed === '') {
+        return null;
+    }
+
+    $mime = is_string($mime_type) && $mime_type !== '' ? $mime_type : 'image/png';
+
+    if (preg_match('/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s', $trimmed, $matches)) {
+        $mime = $matches[1];
+        $trimmed = $matches[2];
+    }
+
+    $trimmed = preg_replace('/\s+/', '', $trimmed);
+    if ($trimmed === '') {
+        return null;
+    }
+
+    return array(
+        'mime_type' => $mime,
+        'data' => $trimmed
+    );
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_lto_text = isset($_POST['content']) ? trim($_POST['content']) : '';
     $action = isset($_POST['action']) ? trim($_POST['action']) : 'parse';
+    $source_image = null;
+
+    if (isset($_POST['image_data'])) {
+        $source_image = normalize_inline_image_payload($_POST['image_data'], isset($_POST['image_mime_type']) ? $_POST['image_mime_type'] : 'image/png');
+    }
 
     if ($raw_lto_text === '') {
         echo json_encode(['error' => 'System Error: Input text context cannot be blank.']);
@@ -148,24 +181,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $instructions = "You are an educational assistant for the RoadRangers platform. ";
     $instructions .= "Convert the following raw traffic/driving rules into an interactive scenario-based branching chatbot dialogue tree. ";
+    $instructions .= "If the supplied source text or image contains a road sign, hazard, instruction, or scenario visual, include the relevant visual as an optional `image` field on the matching node using a valid data URL or public URL string. ";
     $instructions .= "Strict Requirement: Your response must be purely raw JSON conforming EXACTLY to this schema outline, without markdown formatting blocks:\n";
     $instructions .= "{\n";
     $instructions .= "  \"nodes\": {\n";
     $instructions .= "    \"start\": {\n";
     $instructions .= "      \"bot_message\": \"Scenario setup or lesson question text...\",\n";
+    $instructions .= "      \"image\": \"data:image/png;base64,...\" or \"https://example.com/sign.png\" (optional),\n";
     $instructions .= "      \"choices\": [\n";
     $instructions .= "        { \"text\": \"Option A text\", \"next_node\": \"node_a\", \"score_impact\": 10 },\n";
     $instructions .= "        { \"text\": \"Option B text\", \"next_node\": \"node_b\", \"score_impact\": 0 }\n";
     $instructions .= "      ]\n";
     $instructions .= "    },\n";
-    $instructions .= "    \"node_a\": { \"bot_message\": \"Feedback text for picking A.\", \"choices\": [] },\n";
+    $instructions .= "    \"node_a\": { \"bot_message\": \"Feedback text for picking A.\", \"image\": \"optional visual URL\", \"choices\": [] },\n";
     $instructions .= "    \"node_b\": { \"bot_message\": \"Feedback text for picking B.\", \"choices\": [] }\n";
     $instructions .= "  }\n";
     $instructions .= "}\n";
-    $instructions .= "Ensure the nodes flow logically. Final nodes must contain an empty choices array.";
+    $instructions .= "Ensure the nodes flow logically. Final nodes must contain an empty choices array. Do not add any fields beyond this schema except an optional image field on a node. ";
+    $instructions .= "When an uploaded image is provided, use it to describe and reinforce the relevant lesson or decision point. Keep the image field as a valid string value only.";
 
     $system_part = array("parts" => array(array("text" => $instructions)));
-    $content_part = array("parts" => array(array("text" => "Analyze this LTO source reference text:\n\n" . $raw_lto_text)));
+    $content_parts = array(array("text" => "Analyze this LTO source reference text:\n\n" . $raw_lto_text));
+
+    if ($source_image !== null) {
+        $content_parts[] = array(
+            'inline_data' => array(
+                'mime_type' => $source_image['mime_type'],
+                'data' => $source_image['data']
+            )
+        );
+    }
+
+    $content_part = array("parts" => $content_parts);
     
     $payload_array = array(
         "contents" => array($content_part),

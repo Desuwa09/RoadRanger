@@ -651,7 +651,21 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
 
         function parseSelectedFileObject(fileObj) {
             if (!fileObj) return;
-            if (fileObj.type === "text/plain" || fileObj.name.endsWith('.txt')) {
+            pendingSourceImageData = null;
+            pendingSourceImageMime = 'image/png';
+
+            if (fileObj.type.startsWith('image/')) {
+                dropZoneText.innerText = "Reading image file: " + fileObj.name;
+                const docReader = new FileReader();
+                docReader.onload = function(evt) {
+                    pendingSourceImageData = evt.target.result;
+                    pendingSourceImageMime = fileObj.type || 'image/png';
+                    targetTextContentField.value = "Image reference attached: " + fileObj.name + "\n\nUse the visual as a scenario reference during module generation.";
+                    dropZoneText.innerText = "Successfully loaded image: " + fileObj.name;
+                };
+                docReader.readAsDataURL(fileObj);
+            }
+            else if (fileObj.type === "text/plain" || fileObj.name.endsWith('.txt')) {
                 dropZoneText.innerText = "Reading TXT file: " + fileObj.name;
                 const docReader = new FileReader();
                 docReader.onload = function(evt) { targetTextContentField.value = evt.target.result; };
@@ -665,6 +679,21 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                         const typedarray = new Uint8Array(this.result);
                         const pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
                         let fullExtractedText = "";
+
+                        try {
+                            const firstPage = await pdfDoc.getPage(1);
+                            const viewport = firstPage.getViewport({ scale: 1.25 });
+                            const pageCanvas = document.createElement('canvas');
+                            const pageContext = pageCanvas.getContext('2d');
+                            pageCanvas.width = viewport.width;
+                            pageCanvas.height = viewport.height;
+                            await firstPage.render({ canvasContext: pageContext, viewport }).promise;
+                            pendingSourceImageData = pageCanvas.toDataURL('image/png');
+                            pendingSourceImageMime = 'image/png';
+                        } catch (pageRenderError) {
+                            console.warn('PDF preview extraction failed:', pageRenderError);
+                        }
+
                         for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
                             const activePage = await pdfDoc.getPage(pageNum);
                             const contentBlocks = await activePage.getTextContent();
@@ -680,9 +709,12 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                 };
                 pdfReader.readAsArrayBuffer(fileObj);
             } else {
-                alert("File Format Exception: Supports .txt or .pdf formats.");
+                alert("File Format Exception: Supports .txt, .pdf, .png, .jpg, or .jpeg formats.");
             }
         }
+
+        let pendingSourceImageData = null;
+        let pendingSourceImageMime = 'image/png';
 
         const parseButton = document.getElementById('trigger-ai-parse-btn');
         const liveTreeEditor = document.getElementById('live-tree-code-editor');
@@ -718,6 +750,10 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
 
                 const packagePayload = new FormData();
                 packagePayload.append('content', targetTextInputData);
+                if (pendingSourceImageData) {
+                    packagePayload.append('image_data', pendingSourceImageData);
+                    packagePayload.append('image_mime_type', pendingSourceImageMime || 'image/png');
+                }
 
                 try {
                     const responseStream = await fetch('parse_module.php', { method: 'POST', body: packagePayload });
@@ -839,6 +875,17 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
             messageBubbleElement.className = "bg-slate-800 text-slate-100 p-2.5 rounded-lg rounded-tl-none self-start max-w-[90%] shadow-sm leading-snug font-medium";
             messageBubbleElement.innerText = currentActiveNodeData.bot_message;
             mainViewportTray.appendChild(messageBubbleElement);
+
+            if (currentActiveNodeData.image) {
+                const imageElement = document.createElement('img');
+                imageElement.src = currentActiveNodeData.image;
+                imageElement.alt = 'Module visual';
+                imageElement.style.maxWidth = '100%';
+                imageElement.style.borderRadius = '12px';
+                imageElement.style.marginTop = '8px';
+                imageElement.style.border = '1px solid rgba(148, 163, 184, 0.35)';
+                mainViewportTray.appendChild(imageElement);
+            }
 
             if(currentActiveNodeData.choices && currentActiveNodeData.choices.length > 0) {
                 currentActiveNodeData.choices.forEach(optionObject => {
