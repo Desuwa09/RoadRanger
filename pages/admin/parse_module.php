@@ -1,9 +1,14 @@
 <?php
 
+require_once __DIR__ . '/config.php';
 
+session_start();
+header('Content-Type: application/json');
 
-
-
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESSION['is_admin'] !== 1) {
+    echo json_encode(['error' => 'Access Denied: Unauthorized Administrator Session']);
+    exit;
+}
 session_start();
 header('Content-Type: application/json');
 
@@ -68,14 +73,11 @@ function load_local_env_file() {
 
 load_local_env_file();
 
-$gemini_key = getenv('GEMINI_API_KEY');
-if ($gemini_key === false || trim((string)$gemini_key) === '') {
-    $gemini_key = isset($_ENV['GEMINI_API_KEY']) ? $_ENV['GEMINI_API_KEY'] : '';
-}
+$gemini_key = $GEMINI_API_KEY ?? getenv('GEMINI_API_KEY') ?? isset($_ENV['GEMINI_API_KEY']) ? $_ENV['GEMINI_API_KEY'] : '';
 
-if (trim((string)$gemini_key) === '') {
+if (!$gemini_key || trim((string)$gemini_key) === '') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        echo json_encode(['error' => 'Gemini API key is not configured. Set the GEMINI_API_KEY environment variable before generating a module.']);
+        echo json_encode(['error' => 'Gemini API key is not configured. Set the GEMINI_API_KEY environment variable or .env file before generating a module.']);
         exit;
     }
 }
