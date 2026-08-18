@@ -13,19 +13,34 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESS
 }
 
 function load_local_env_file() {
-    $env_path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env';
-    if (!is_file($env_path)) {
-        return;
+    $candidate_paths = array(
+        dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env',
+        __DIR__ . DIRECTORY_SEPARATOR . '../../.env',
+        realpath(__DIR__ . '/../../') . DIRECTORY_SEPARATOR . '.env',
+        getcwd() . DIRECTORY_SEPARATOR . '.env',
+        isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR . '.env' : null,
+    );
+
+    $env_path = null;
+    foreach ($candidate_paths as $path) {
+        if ($path && is_file($path)) {
+            $env_path = $path;
+            break;
+        }
+    }
+
+    if (!$env_path) {
+        return false;
     }
 
     $lines = file($env_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     if ($lines === false) {
-        return;
+        return false;
     }
 
     foreach ($lines as $line) {
         $trimmed = trim($line);
-        if ($trimmed === '' || str_starts_with($trimmed, '#')) {
+        if ($trimmed === '' || strpos($trimmed, '#') === 0) {
             continue;
         }
 
@@ -47,6 +62,8 @@ function load_local_env_file() {
             $_SERVER[$name] = $value;
         }
     }
+
+    return true;
 }
 
 load_local_env_file();
