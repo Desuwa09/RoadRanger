@@ -27,13 +27,6 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESS
     echo json_encode(['error' => 'Access Denied: Unauthorized Administrator Session']);
     exit;
 }
-session_start();
-header('Content-Type: application/json');
-
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESSION['is_admin'] !== 1) {
-    echo json_encode(['error' => 'Access Denied: Unauthorized Administrator Session']);
-    exit;
-}
 
 function load_local_env_file() {
     $candidate_paths = array(
@@ -188,8 +181,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         curl_setopt($process, CURLOPT_POST, true);
         curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($payload_array));
         curl_setopt($process, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-        curl_setopt($process, CURLOPT_TIMEOUT, 60);
-        curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($process, CURLOPT_TIMEOUT, 180);
+        curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 20);
 
         $server_output = curl_exec($process);
 
@@ -315,8 +308,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     curl_setopt($process, CURLOPT_POST, true);
     curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($payload_array));
     curl_setopt($process, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-    curl_setopt($process, CURLOPT_TIMEOUT, 60);
-    curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($process, CURLOPT_TIMEOUT, 180);
+    curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 20);
     
     $server_output = curl_exec($process);
     
