@@ -797,8 +797,9 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                     try {
                         serverJsonOutput = JSON.parse(rawResponseText);
                     } catch (parseError) {
-                        console.error('parse_module raw response:', rawResponseText);
-                        alert('AI Synthesis Fault Trace: Unable to parse the Gemini response. Check the browser console for the raw output.');
+                        const responsePreview = rawResponseText.replace(/\s+/g, ' ').trim().slice(0, 500);
+                        console.error('parse_module response:', responseStream.status, rawResponseText);
+                        alert('AI Synthesis Fault Trace: The server returned invalid JSON (HTTP ' + responseStream.status + ').\n\nResponse: ' + responsePreview);
                         return;
                     }
 

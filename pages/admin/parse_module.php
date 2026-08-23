@@ -4,6 +4,24 @@ require_once __DIR__ . '/config.php';
 
 session_start();
 header('Content-Type: application/json');
+ob_start();
+register_shutdown_function(function () {
+    $output = ob_get_clean();
+    if ($output === '') {
+        return;
+    }
+
+    if (json_decode($output, true) !== null) {
+        echo $output;
+        return;
+    }
+
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'The module generation service returned an invalid server response.',
+        'raw_output' => substr(strip_tags($output), 0, 1024)
+    ]);
+});
 
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESSION['is_admin'] !== 1) {
     echo json_encode(['error' => 'Access Denied: Unauthorized Administrator Session']);
@@ -73,7 +91,7 @@ function load_local_env_file() {
 
 load_local_env_file();
 
-$gemini_key = $GEMINI_API_KEY ?? getenv('GEMINI_API_KEY') ?? isset($_ENV['GEMINI_API_KEY']) ? $_ENV['GEMINI_API_KEY'] : '';
+$gemini_key = $GEMINI_API_KEY ?? getenv('GEMINI_API_KEY') ?? ($_ENV['GEMINI_API_KEY'] ?? '');
 
 if (!$gemini_key || trim((string)$gemini_key) === '') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
