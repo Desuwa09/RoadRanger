@@ -792,12 +792,12 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
 
                 try {
                     const responseStream = await fetch('parse_module.php', { method: 'POST', body: packagePayload });
+                    const rawResponseText = await responseStream.text();
                     let serverJsonOutput;
                     try {
-                        serverJsonOutput = await responseStream.json();
+                        serverJsonOutput = JSON.parse(rawResponseText);
                     } catch (parseError) {
-                        const rawText = await responseStream.text();
-                        console.error('parse_module raw response:', rawText);
+                        console.error('parse_module raw response:', rawResponseText);
                         alert('AI Synthesis Fault Trace: Unable to parse the Gemini response. Check the browser console for the raw output.');
                         return;
                     }
