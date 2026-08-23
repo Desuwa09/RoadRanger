@@ -54,16 +54,25 @@ $completion_date = htmlspecialchars(date('F j, Y', strtotime($certificate['issue
         body { margin: 0; padding: 20px; background: #e2e8f0; font-family: Georgia, serif; color: #172033; }
         .actions { max-width: 1100px; margin: 0 auto 15px; font-family: Arial, sans-serif; }
         .actions a, .actions button { background: #0f172a; color: white; border: 0; padding: 10px 14px; text-decoration: none; cursor: pointer; border-radius: 4px; }
-        .certificate { position: relative; max-width: 1100px; aspect-ratio: 1.414 / 1; margin: auto; background: white url('<?php echo $template_path; ?>') center / cover no-repeat; overflow: hidden; }
+        .certificate { position: relative; max-width: 1100px; aspect-ratio: 1.414 / 1; margin: auto; background: white; overflow: hidden; }
+        .certificate-template { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+        .certificate > :not(.certificate-template) { z-index: 1; }
         .recipient { position: absolute; top: 48%; left: 10%; width: 80%; text-align: center; font-size: clamp(25px, 5vw, 68px); font-weight: bold; }
         .date { position: absolute; top: 66%; left: 10%; width: 80%; text-align: center; font: 18px Arial, sans-serif; }
         .code { position: absolute; bottom: 4%; left: 5%; font: 11px Arial, sans-serif; }
-        @media print { body { padding: 0; background: white; } .actions { display: none; } .certificate { max-width: none; width: 100vw; } }
+        @page { size: landscape; margin: 0; }
+        @media print {
+            body { padding: 0; background: white; }
+            .actions { display: none; }
+            .certificate { max-width: none; width: 100vw; height: 100vh; aspect-ratio: auto; }
+            .certificate-template { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+        }
     </style>
 </head>
 <body>
     <div class="actions"><button type="button" onclick="window.print()">Print / Save as PDF</button> <a href="dashboard.php">Back to settings</a></div>
     <main class="certificate" aria-label="Certificate of completion">
+        <img class="certificate-template" src="<?php echo $template_path; ?>" alt="">
         <div class="recipient"><?php echo $recipient_name; ?></div>
         <div class="date">Completed <?php echo $completion_date; ?> - <?php echo htmlspecialchars($certificate['title'], ENT_QUOTES, 'UTF-8'); ?></div>
         <div class="code">Certificate <?php echo htmlspecialchars($certificate['certificate_code'], ENT_QUOTES, 'UTF-8'); ?></div>
