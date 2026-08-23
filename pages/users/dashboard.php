@@ -72,6 +72,7 @@
     $memory_progress = ['percent' => 0, 'is_completed' => 0];
     $conveyor_progress = ['percent' => 0, 'is_completed' => 0];
     $module_stats = ['total' => 0, 'completed' => 0];
+    $certificate_modules = [];
     try {
         
         $player_difficulty = $user['current_difficulty'] ?? 'EASY';
@@ -88,9 +89,13 @@
         $module_stmt->execute([$player_difficulty]);
         $hazard_modules = $module_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $learning_stmt = $conn->prepare("SELECT lm.module_id, lm.chapter_number, lm.title, lm.description, lm.created_at, COALESCE(p.progress_percent, 0) AS progress_percent, COALESCE(p.is_completed, 0) AS is_completed FROM learning_modules lm LEFT JOIN progress p ON p.module_id = lm.module_id AND p.user_id = ? AND p.game_name = 'learning_module' AND p.stage_number = 0 ORDER BY lm.chapter_number ASC, lm.module_id ASC");
+        $learning_stmt = $conn->prepare("SELECT lm.module_id, lm.chapter_number, lm.title, lm.description, lm.created_at, lm.certificate_template, COALESCE(p.progress_percent, 0) AS progress_percent, COALESCE(p.is_completed, 0) AS is_completed FROM learning_modules lm LEFT JOIN progress p ON p.module_id = lm.module_id AND p.user_id = ? AND p.game_name = 'learning_module' AND p.stage_number = 0 ORDER BY lm.chapter_number ASC, lm.module_id ASC");
         $learning_stmt->execute([$user_id]);
         $learning_modules = $learning_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $certificate_stmt = $conn->prepare("SELECT lm.module_id, lm.title, lm.certificate_template, COALESCE(p.is_completed, 0) AS is_completed, c.certificate_id, c.issue_date FROM learning_modules lm LEFT JOIN progress p ON p.module_id = lm.module_id AND p.user_id = ? AND p.game_name = 'learning_module' AND p.stage_number = 0 LEFT JOIN certificates c ON c.module_id = lm.module_id AND c.user_id = ? WHERE lm.certificate_template IS NOT NULL AND lm.certificate_template <> '' ORDER BY lm.chapter_number ASC, lm.module_id ASC");
+        $certificate_stmt->execute([$user_id, $user_id]);
+        $certificate_modules = $certificate_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $memory_stmt = $conn->prepare("SELECT progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'memory_game' AND stage_number = 0 LIMIT 1");
         $memory_stmt->execute([$user_id]);
@@ -716,6 +721,35 @@
                         <span style="color: #6c757d; font-size: 13px;">Your name will be updated instantly.</span>
                     </div>
                 </form>
+            </div>
+
+            <div class="profile-settings-card">
+                <h3>Certificates</h3>
+                <?php if (empty($certificate_modules)): ?>
+                    <p style="color: #6c757d;">Certificates will appear here when an administrator attaches one to a learning module.</p>
+                <?php else: ?>
+                    <?php foreach ($certificate_modules as $certificate_module): ?>
+                        <div class="data-row" style="display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
+                            <div>
+                                <strong><?php echo htmlspecialchars($certificate_module['title']); ?></strong>
+                                <div style="font-size: 13px; color: #6c757d; margin-top: 4px;">
+                                    <?php if ($certificate_module['certificate_id']): ?>
+                                        Claimed on <?php echo date('M d, Y', strtotime($certificate_module['issue_date'])); ?>
+                                    <?php elseif (intval($certificate_module['is_completed'])): ?>
+                                        Completed and ready to claim
+                                    <?php else: ?>
+                                        Complete this module to unlock the certificate
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <?php if ($certificate_module['certificate_id']): ?>
+                                <a href="certificate.php?certificate_id=<?php echo intval($certificate_module['certificate_id']); ?>" target="_blank" rel="noopener" class="profile-form-actions button" style="background: #198754; color: white; padding: 9px 13px; border-radius: 6px; text-decoration: none; font-size: 13px;">View Certificate</a>
+                            <?php elseif (intval($certificate_module['is_completed'])): ?>
+                                <a href="certificate.php?action=claim&module_id=<?php echo intval($certificate_module['module_id']); ?>" class="profile-form-actions button" style="background: #007bff; color: white; padding: 9px 13px; border-radius: 6px; text-decoration: none; font-size: 13px;">Claim Certificate</a>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
         </div>
 

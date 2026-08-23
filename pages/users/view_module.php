@@ -18,7 +18,7 @@ if ($module_id <= 0) {
 }
 
 try {
-    $module_stmt = $conn->prepare('SELECT module_id, chapter_number, title, description, module_data FROM learning_modules WHERE module_id = ? LIMIT 1');
+    $module_stmt = $conn->prepare('SELECT module_id, chapter_number, title, description, module_data, certificate_template FROM learning_modules WHERE module_id = ? LIMIT 1');
     $module_stmt->execute([$module_id]);
     $module = $module_stmt->fetch(PDO::FETCH_ASSOC);
 

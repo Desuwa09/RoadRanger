@@ -40,12 +40,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_action'])) {
         $json_tree_string = $_POST['module_json'];
 
         try {
-            $insert_sql = "INSERT INTO learning_modules (chapter_number, title, description, module_data, created_by) VALUES (?, ?, ?, ?, ?)";
+            $certificate_template_path = null;
+            if (isset($_FILES['certificate_template']) && $_FILES['certificate_template']['error'] !== UPLOAD_ERR_NO_FILE) {
+                if ($_FILES['certificate_template']['error'] !== UPLOAD_ERR_OK) {
+                    throw new RuntimeException('The certificate template could not be uploaded.');
+                }
+
+                $certificate_extension = strtolower(pathinfo($_FILES['certificate_template']['name'], PATHINFO_EXTENSION));
+                $allowed_certificate_extensions = ['jpg', 'jpeg', 'png', 'webp'];
+                if (!in_array($certificate_extension, $allowed_certificate_extensions, true)) {
+                    throw new RuntimeException('Certificate templates must be JPG, PNG, or WEBP images.');
+                }
+
+                $certificate_upload_dir = __DIR__ . '/../../assets/imgs/Certificates/';
+                if (!is_dir($certificate_upload_dir) && !mkdir($certificate_upload_dir, 0755, true)) {
+                    throw new RuntimeException('The certificate upload directory could not be created.');
+                }
+
+                $certificate_filename = uniqid('certificate_', true) . '.' . $certificate_extension;
+                $certificate_target = $certificate_upload_dir . $certificate_filename;
+                if (!move_uploaded_file($_FILES['certificate_template']['tmp_name'], $certificate_target)) {
+                    throw new RuntimeException('The certificate template could not be saved.');
+                }
+                $certificate_template_path = '../../assets/imgs/Certificates/' . $certificate_filename;
+            }
+
+            $insert_sql = "INSERT INTO learning_modules (chapter_number, title, description, module_data, certificate_template, created_by) VALUES (?, ?, ?, ?, ?, ?)";
             $run_insert = $db_connection->prepare($insert_sql);
-            $run_insert->execute([$ch_num, $mod_title, $mod_desc, $json_tree_string, $_SESSION['user_id']]);
+            $run_insert->execute([$ch_num, $mod_title, $mod_desc, $json_tree_string, $certificate_template_path, $_SESSION['user_id']]);
             $feedback_message = "<div class='bg-green-100 border border-green-300 text-green-800 p-3 rounded mb-4 font-medium text-xs'>Success: Chapter " . $ch_num . " has been successfully published to the citizen portal!</div>";
         } catch (PDOException $ex) {
             $feedback_message = "<div class='bg-red-100 border border-red-300 text-red-800 p-3 rounded mb-4 font-medium text-xs'>Database Save Error: " . $ex->getMessage() . "</div>";
+        } catch (RuntimeException $ex) {
+            $feedback_message = "<div class='bg-red-100 border border-red-300 text-red-800 p-3 rounded mb-4 font-medium text-xs'>Certificate Upload Error: " . htmlspecialchars($ex->getMessage()) . "</div>";
         }
     }
 
@@ -71,6 +98,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_action'])) {
             $cleanup_sql = "DELETE FROM progress WHERE module_id = ? AND game_name = 'learning_module'";
             $cleanup_stmt = $db_connection->prepare($cleanup_sql);
             $cleanup_stmt->execute([$target_module_id]);
+
+            $certificate_cleanup_stmt = $db_connection->prepare("DELETE FROM certificates WHERE module_id = ?");
+            $certificate_cleanup_stmt->execute([$target_module_id]);
 
             $delete_sql = "DELETE FROM learning_modules WHERE module_id = ?";
             $run_delete = $db_connection->prepare($delete_sql);
@@ -168,7 +198,7 @@ try {
 }
 
 try {
-    $module_stmt = $db_connection->query("SELECT module_id, chapter_number, title, description, created_at FROM learning_modules ORDER BY chapter_number ASC, module_id DESC");
+    $module_stmt = $db_connection->query("SELECT module_id, chapter_number, title, description, certificate_template, created_at FROM learning_modules ORDER BY chapter_number ASC, module_id DESC");
     $learning_modules_list = $module_stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     
@@ -404,7 +434,7 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                             </div>
                         </div>
 
-                        <form action="" method="POST" class="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4">
+                        <form action="" method="POST" enctype="multipart/form-data" class="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4">
                             <input type="hidden" name="form_action" value="save_generated_tree">
                             <input type="hidden" id="hidden-submission-json-field" name="module_json">
                             <h3 class="text-sm font-black text-slate-900 uppercase border-b border-slate-100 pb-2">Step 4: Publication Panel</h3>
@@ -421,6 +451,11 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                             <div>
                                 <label class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Short Module Description</label>
                                 <input type="text" name="description" class="w-full border border-slate-200 rounded p-1.5 text-xs focus:outline-none" required placeholder="Ex: Learning road signs guidelines...">
+                            </div>
+                            <div>
+                                <label for="certificate_template" class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Certificate Template (optional)</label>
+                                <input type="file" id="certificate_template" name="certificate_template" accept=".jpg,.jpeg,.png,.webp" class="w-full border border-slate-200 rounded p-1.5 text-xs focus:outline-none">
+                                <p class="text-[10px] text-slate-400 mt-1">Upload a certificate background image. The learner name and completion date will be placed on it.</p>
                             </div>
                             <button type="submit" id="commit-production-publish-btn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase py-3 rounded tracking-wider transition shadow-md" disabled>Publish Module to Live System</button>
                         </form>
