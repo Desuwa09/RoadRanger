@@ -106,6 +106,13 @@
     return DIFFICULTY_MODE_MAP[selected] || null;
   }
 
+  function getSavedModeProgress(stage) {
+    const saved = typeof ROADRANGER_MEMORY_PROGRESS !== 'undefined'
+      ? ROADRANGER_MEMORY_PROGRESS[String(stage)] || ROADRANGER_MEMORY_PROGRESS[stage]
+      : null;
+    return saved || { percent: 0, is_completed: 0 };
+  }
+
   function resetRoundUI() {
     clearTimers();
     state.currentPlate = null;
@@ -141,14 +148,17 @@
     }
 
     state.currentStage = mode.stage;
-    state.currentLevel = 1;
     state.totalLevels = STAGE_CONFIG[mode.stage].levels;
-    state.completedLevels = 0;
+    const savedProgress = getSavedModeProgress(mode.stage);
+    state.completedLevels = Math.min(state.totalLevels, Math.max(0, Math.floor(Number(savedProgress.percent) / 10)));
+    state.currentLevel = Math.min(state.completedLevels + 1, state.totalLevels);
+    state.isCompleted = Number(savedProgress.is_completed) === 1 || state.completedLevels >= state.totalLevels;
     updateLevelDisplay();
     updateProgressUI();
     resetRoundUI();
-    refs.startBtn.disabled = false;
-    setFeedback(`Mode selected: ${mode.label}. Click Start to begin.`, "info");
+    state.isCompleted = Number(savedProgress.is_completed) === 1 || state.completedLevels >= state.totalLevels;
+    refs.startBtn.disabled = state.isCompleted;
+    setFeedback(state.isCompleted ? `${mode.label} is already completed.` : `${mode.label} selected. Click Start to continue.`, state.isCompleted ? "success" : "info");
   }
 
   function shuffleArray(items) {

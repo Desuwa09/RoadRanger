@@ -92,7 +92,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $level_stmt->execute([$game_id, $scenario_name, $description, $difficulty, $relative_db_path, $time_limit_seconds]);
         $new_level_id = $conn->lastInsertId();
 
-        if ($selected_game_key === 'hotspot_test') {
+        if ($selected_game_key === 'conveyor_game') {
+            $sign_images = $_FILES['conveyor_sign_images'] ?? null;
+            $sign_meanings = $_POST['conveyor_sign_meanings'] ?? [];
+            $sign_categories = $_POST['conveyor_sign_categories'] ?? [];
+            $sign_count = is_array($sign_images['name'] ?? null) ? count($sign_images['name']) : 0;
+
+            if ($sign_count === 0) {
+                throw new Exception("Please add at least one sign image for Conveyor Mania.");
+            }
+
+            $sign_stmt = $conn->prepare("INSERT INTO game_items (level_id, item_label, item_image, target_category) VALUES (?, ?, ?, ?)");
+            $allowed_sign_extensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+            $sign_upload_dir = __DIR__ . '/../../assets/imgs/Signs/';
+            if (!is_dir($sign_upload_dir) && !mkdir($sign_upload_dir, 0755, true)) {
+                throw new Exception("The sign image directory could not be created.");
+            }
+
+            $saved_sign_count = 0;
+            for ($sign_index = 0; $sign_index < $sign_count; $sign_index++) {
+                if (($sign_images['error'][$sign_index] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                    throw new Exception("Every Conveyor Mania sign row must include a valid image.");
+                }
+
+                $sign_extension = strtolower(pathinfo($sign_images['name'][$sign_index], PATHINFO_EXTENSION));
+                if (!in_array($sign_extension, $allowed_sign_extensions, true)) {
+                    throw new Exception("Sign images must be JPG, PNG, WEBP, or GIF files.");
+                }
+
+                $sign_filename = uniqid('sign_', true) . '.' . $sign_extension;
+                if (!move_uploaded_file($sign_images['tmp_name'][$sign_index], $sign_upload_dir . $sign_filename)) {
+                    throw new Exception("A sign image could not be saved.");
+                }
+
+                $sign_meaning = trim($sign_meanings[$sign_index] ?? '');
+                $sign_category = trim($sign_categories[$sign_index] ?? '');
+                if ($sign_meaning === '' || !in_array($sign_category, ['regulatory', 'warning', 'informative'], true)) {
+                    throw new Exception("Every sign needs a meaning and a valid category.");
+                }
+
+                $sign_stmt->execute([$new_level_id, $sign_meaning, '../../assets/imgs/Signs/' . $sign_filename, $sign_category]);
+                $saved_sign_count++;
+            }
+        } elseif ($selected_game_key === 'hotspot_test') {
             $items_array = json_decode($hotspots_json, true);
             if (!is_array($items_array) || count($items_array) === 0) {
                 throw new Exception("Please draw at least one target.");
@@ -140,6 +182,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         .subtle-note { font-size: 12px; color: #64748b; margin-top: 6px; }
         .workspace-grid { display: grid; grid-template-columns: 1fr 320px; gap: 25px; margin-top: 20px; }
         .simple-builder { display: none; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 18px; margin-top: 15px; }
+        .conveyor-sign-row { display: grid; grid-template-columns: 1.2fr 1.2fr 1fr auto; gap: 8px; align-items: center; margin: 10px 0; }
+        .remove-sign-row { padding: 10px; border: 0; border-radius: 4px; background: #fee2e2; color: #991b1b; cursor: pointer; }
+        @media (max-width: 760px) { .conveyor-sign-row { grid-template-columns: 1fr; } }
         .canvas-wrapper { position: relative; background: #e2e8f0; border-radius: 6px; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; min-height: 400px; }
         #canvas-container { 
             position: relative; 
@@ -196,6 +241,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         </div>
         <div class="form-group"><label>Upload Image (optional for memory/conveyor):</label><input type="file" id="scenario_image" name="scenario_image" accept="image/*"></div>
 
+        <div id="conveyor-sign-builder" class="simple-builder">
+            <label>Conveyor Mania Signs:</label>
+            <p class="subtle-note">Add each sign image, its meaning, and the category where users should place it.</p>
+            <div id="conveyor-sign-rows"></div>
+            <button type="button" class="tool-btn" id="add-conveyor-sign">Add Another Sign</button>
+        </div>
+
         <div id="simple-level-builder" class="simple-builder">
             <p class="subtle-note">This builder is for memory and conveyor levels. You can add a title, description, difficulty, timing, and an optional image. The game data itself is handled later by the game engine.</p>
         </div>
@@ -246,6 +298,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     const refs = { 
         workspace: document.getElementById('creator-workspace'), 
         simpleBuilder: document.getElementById('simple-level-builder'),
+        conveyorSignBuilder: document.getElementById('conveyor-sign-builder'),
+        conveyorSignRows: document.getElementById('conveyor-sign-rows'),
+        addConveyorSign: document.getElementById('add-conveyor-sign'),
         nonHotspotSave: document.getElementById('non-hotspot-save'),
         sceneryImg: document.getElementById('scenery-img'), 
         canvasContainer: document.getElementById('canvas-container'), 
@@ -260,9 +315,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     function syncGameBuilderMode() {
         const selectedGame = refs.gameTypeSelect.value;
         const isHotspot = selectedGame === 'hotspot_test';
+        const isConveyor = selectedGame === 'conveyor_game';
 
         refs.workspace.style.display = isHotspot ? 'block' : 'none';
         refs.simpleBuilder.style.display = isHotspot ? 'none' : 'block';
+        refs.conveyorSignBuilder.style.display = isConveyor ? 'block' : 'none';
+        refs.conveyorSignRows.querySelectorAll('input, select').forEach((field) => {
+            field.disabled = !isConveyor;
+            field.required = isConveyor;
+        });
         refs.nonHotspotSave.style.display = isHotspot ? 'none' : 'block';
 
         if (!isHotspot) {
@@ -277,6 +338,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 
     refs.gameTypeSelect.addEventListener('change', syncGameBuilderMode);
+
+    function addConveyorSignRow() {
+        const row = document.createElement('div');
+        row.className = 'conveyor-sign-row';
+        row.innerHTML = `
+            <input type="file" name="conveyor_sign_images[]" accept="image/*" required>
+            <input type="text" name="conveyor_sign_meanings[]" placeholder="Meaning, e.g. Stop" required>
+            <select name="conveyor_sign_categories[]" required>
+                <option value="">Answer category</option>
+                <option value="regulatory">Regulatory</option>
+                <option value="warning">Warning</option>
+                <option value="informative">Informative</option>
+            </select>
+            <button type="button" class="remove-sign-row">Remove</button>
+        `;
+        row.querySelector('.remove-sign-row').addEventListener('click', () => {
+            row.remove();
+            if (!refs.conveyorSignRows.children.length) addConveyorSignRow();
+        });
+        refs.conveyorSignRows.appendChild(row);
+    }
+
+    refs.addConveyorSign.addEventListener('click', addConveyorSignRow);
+    addConveyorSignRow();
 
     refs.fileInput.addEventListener('change', (e) => {
         if (!e.target.files.length) return;

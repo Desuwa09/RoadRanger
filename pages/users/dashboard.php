@@ -70,7 +70,9 @@
     $hazard_modules = [];
     $learning_modules = [];
     $memory_progress = ['percent' => 0, 'is_completed' => 0];
+    $memory_progress_by_stage = [];
     $conveyor_progress = ['percent' => 0, 'is_completed' => 0];
+    $conveyor_signs = [];
     $module_stats = ['total' => 0, 'completed' => 0];
     $certificate_modules = [];
     $conveyor_game_locked = false;
@@ -106,6 +108,15 @@
             $memory_progress['is_completed'] = intval($memory_progress_row['is_completed'] ?? 0);
         }
 
+        $memory_stage_stmt = $conn->prepare("SELECT stage_number, progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'memory_game' AND stage_number BETWEEN 1 AND 3 ORDER BY stage_number ASC");
+        $memory_stage_stmt->execute([$user_id]);
+        while ($memory_stage_row = $memory_stage_stmt->fetch(PDO::FETCH_ASSOC)) {
+            $memory_progress_by_stage[(int)$memory_stage_row['stage_number']] = [
+                'percent' => (float)($memory_stage_row['progress_percent'] ?? 0),
+                'is_completed' => (int)($memory_stage_row['is_completed'] ?? 0)
+            ];
+        }
+
         $conveyor_stmt = $conn->prepare("SELECT progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'conveyor_mania' AND stage_number = 0 LIMIT 1");
         $conveyor_stmt->execute([$user_id]);
         $conveyor_progress_row = $conveyor_stmt->fetch(PDO::FETCH_ASSOC);
@@ -123,6 +134,9 @@
         $conveyor_completion_at = $conveyor_completion_stmt->fetchColumn();
 
         $conveyor_game_locked = (bool)$conveyor_completion_at && (!$latest_signage_at || strtotime($conveyor_completion_at) >= strtotime($latest_signage_at));
+
+        $conveyor_signs_stmt = $conn->query("SELECT gi.item_id, gi.item_label, gi.item_image, gi.target_category FROM game_items gi JOIN game_levels gl ON gi.level_id = gl.level_id JOIN games g ON gl.game_id = g.game_id WHERE g.game_key = 'conveyor_game' AND gi.item_image IS NOT NULL AND gi.item_image <> '' ORDER BY gl.created_at ASC, gi.item_id ASC");
+        $conveyor_signs = $conveyor_signs_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $module_count_stmt = $conn->prepare("SELECT COUNT(*) AS total_modules FROM learning_modules");
         $module_count_stmt->execute();
@@ -313,6 +327,15 @@
             font-weight: bold;
             font-size: 13px;
         }
+        .cm-sign-reference { margin: 16px 0; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; }
+        .cm-sign-reference summary { padding: 12px; cursor: pointer; font-weight: bold; color: #1e3a5f; }
+        .cm-reference-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 0 12px 12px; }
+        .cm-reference-item { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 4px; background: white; }
+        .cm-reference-item img { width: 42px; height: 42px; object-fit: contain; }
+        .cm-reference-item span { display: flex; flex-direction: column; font-size: 12px; }
+        .cm-reference-item small { color: #64748b; text-transform: capitalize; }
+        .cm-reference-item p { margin: 3px 0 0; color: #475569; font-size: 11px; line-height: 1.35; }
+        @media (max-width: 640px) { .cm-reference-list { grid-template-columns: 1fr; } }
         .memory-difficulty-grid {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -884,6 +907,10 @@
                     <div id="cm-progress-fill"></div>
                     <div id="cm-progress-text">0%</div>
                 </div>
+                <details id="cm-sign-reference" class="cm-sign-reference">
+                    <summary>View sign meanings and categories</summary>
+                    <div id="cm-sign-reference-list" class="cm-reference-list"></div>
+                </details>
                 
                 <div id="cm-current-sign-label" style="font-weight: bold; color: #34495e;">Current Sign: --</div>
                 <div class="cm-conveyor-belt">
@@ -1027,6 +1054,8 @@
     </script>
     <script>
         const ROADRANGER_SAVE_URL = "memory_progress.php";
+        const ROADRANGER_MEMORY_PROGRESS = <?php echo json_encode($memory_progress_by_stage, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const ROADRANGER_CONVEYOR_SIGNS = <?php echo json_encode($conveyor_signs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     </script>
     
     <script src="../../assets/js/memory_game.js?v=<?php echo time(); ?>"></script>
