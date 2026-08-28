@@ -73,6 +73,7 @@
     $conveyor_progress = ['percent' => 0, 'is_completed' => 0];
     $module_stats = ['total' => 0, 'completed' => 0];
     $certificate_modules = [];
+    $conveyor_game_locked = false;
     try {
         
         $player_difficulty = $user['current_difficulty'] ?? 'EASY';
@@ -112,6 +113,16 @@
             $conveyor_progress['percent'] = intval($conveyor_progress_row['progress_percent'] ?? 0);
             $conveyor_progress['is_completed'] = intval($conveyor_progress_row['is_completed'] ?? 0);
         }
+
+        $conveyor_version_stmt = $conn->prepare("SELECT MAX(gl.created_at) AS latest_signage_at FROM game_levels gl JOIN games g ON gl.game_id = g.game_id WHERE g.game_key = 'conveyor_game'");
+        $conveyor_version_stmt->execute();
+        $latest_signage_at = $conveyor_version_stmt->fetchColumn();
+
+        $conveyor_completion_stmt = $conn->prepare("SELECT completion_date FROM progress WHERE user_id = ? AND game_name = 'conveyor_mania' AND stage_number = 0 AND is_completed = 1 ORDER BY completion_date DESC LIMIT 1");
+        $conveyor_completion_stmt->execute([$user_id]);
+        $conveyor_completion_at = $conveyor_completion_stmt->fetchColumn();
+
+        $conveyor_game_locked = (bool)$conveyor_completion_at && (!$latest_signage_at || strtotime($conveyor_completion_at) >= strtotime($latest_signage_at));
 
         $module_count_stmt = $conn->prepare("SELECT COUNT(*) AS total_modules FROM learning_modules");
         $module_count_stmt->execute();
@@ -292,6 +303,39 @@
         .mg-feedback.info, .cm-feedback.info { background: #d1ecf1; color: #0c5460; }
         .mg-feedback.success, .cm-feedback.success { background: #d4edda; color: #155724; }
         .mg-feedback.error, .cm-feedback.error { background: #f8d7da; color: #721c24; }
+        .cm-lock-message {
+            margin: 12px 0;
+            padding: 12px;
+            border: 1px solid #f0c36d;
+            border-radius: 4px;
+            background: #fff3cd;
+            color: #856404;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .memory-difficulty-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin: 22px 0 12px;
+        }
+        .memory-difficulty-card {
+            border: 2px solid #dbe3ea;
+            border-radius: 8px;
+            padding: 16px 12px;
+            background: #f8fafc;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, transform 0.2s;
+        }
+        .memory-difficulty-card:hover { border-color: #3498db; transform: translateY(-2px); }
+        .memory-difficulty-card.is-selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 2px #bfdbfe; }
+        .memory-difficulty-card.recommended { border-color: #f59e0b; }
+        .memory-difficulty-card.recommended.is-selected { border-color: #d97706; background: #fffbeb; box-shadow: 0 0 0 2px #fde68a; }
+        .memory-difficulty-card h3 { margin: 0 0 6px; font-size: 16px; }
+        .memory-difficulty-card p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.4; }
+        .memory-recommendation { margin-top: 8px; color: #b45309; font-size: 11px; font-weight: bold; }
+        @media (max-width: 640px) { .memory-difficulty-grid { grid-template-columns: 1fr; } }
         
         .game-controls button {
             padding: 10px 20px; font-size: 14px; font-weight: bold;
@@ -796,14 +840,26 @@
                         </div>
                     </div>
                 </div>
-                <div style="margin: 12px 0 8px 0; text-align: center;">
-                    <label for="mg-difficulty-select" style="display: block; font-weight: bold; margin-bottom: 6px;">Select Mode</label>
-                    <select id="mg-difficulty-select" style="padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1; min-width: 220px; text-align: center;">
-                        <option value="">Choose Easy / Medium / Hard</option>
-                        <option value="easy">Easy</option>
-                        <option value="medium">Medium</option>
-                        <option value="hard">Hard</option>
-                    </select>
+                <div style="margin: 22px 0 8px; text-align: center;">
+                    <div style="font-weight: bold; margin-bottom: 6px;">Choose Your Difficulty</div>
+                    <div class="memory-difficulty-grid">
+                        <?php $recommended_memory_difficulty = strtolower($user['current_difficulty'] ?? 'hard'); ?>
+                        <button type="button" class="memory-difficulty-card <?php echo $recommended_memory_difficulty === 'easy' ? 'recommended' : ''; ?>" data-memory-difficulty="easy">
+                            <h3>Easy</h3>
+                            <p>Choose the complete plate number.</p>
+                            <?php if ($recommended_memory_difficulty === 'easy'): ?><div class="memory-recommendation">Recommended for you</div><?php endif; ?>
+                        </button>
+                        <button type="button" class="memory-difficulty-card <?php echo $recommended_memory_difficulty === 'medium' ? 'recommended' : ''; ?>" data-memory-difficulty="medium">
+                            <h3>Medium</h3>
+                            <p>Choose the letter and number parts.</p>
+                            <?php if ($recommended_memory_difficulty === 'medium'): ?><div class="memory-recommendation">Recommended for you</div><?php endif; ?>
+                        </button>
+                        <button type="button" class="memory-difficulty-card <?php echo $recommended_memory_difficulty === 'hard' ? 'recommended' : ''; ?>" data-memory-difficulty="hard">
+                            <h3>Hard</h3>
+                            <p>Type the complete plate number.</p>
+                            <?php if ($recommended_memory_difficulty === 'hard'): ?><div class="memory-recommendation">Recommended for you</div><?php endif; ?>
+                        </button>
+                    </div>
                 </div>
                 <div id="mg-feedback" class="mg-feedback info">Choose a mode to begin the Memory Game.</div>
                 <div class="game-controls">
@@ -815,8 +871,11 @@
         </div>
 
         <div id="view-conveyor" class="app-view">
-            <div id="conveyor-mania-game" class="game-wrapper">
+            <div id="conveyor-mania-game" class="game-wrapper" data-conveyor-locked="<?php echo $conveyor_game_locked ? '1' : '0'; ?>">
                 <h2>Conveyor Mania</h2>
+                <?php if ($conveyor_game_locked): ?>
+                    <div class="cm-lock-message">Conveyor Mania is complete. It will unlock when the administrator adds new signage.</div>
+                <?php endif; ?>
                 <div class="cm-header">
                     <span>Time Remaining: <span id="cm-time-left">02:00</span></span>
                     <span>Sorted: <span id="cm-sorted-count">0</span> / <span id="cm-total-count">0</span></span>

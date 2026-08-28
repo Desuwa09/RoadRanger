@@ -316,6 +316,8 @@
     refs = getRefs();
     if (!refs.gameCard || !refs.sign) return;
 
+    state.isCompleted = refs.gameCard.dataset.conveyorLocked === "1";
+
     refs.totalCount.textContent = String(signs.length);
     refs.timeLeft.textContent = formatTimer(state.timerLeft);
     refs.skipBtn.addEventListener("click", skipCurrentSign);
@@ -326,6 +328,13 @@
     updateProgressUI();
     setFeedback("Drag each sign into the right category box.", "info");
     renderCurrentSign();
+
+    if (state.isCompleted) {
+      refs.gameCard.classList.add("is-disabled");
+      refs.sign.draggable = false;
+      refs.skipBtn.disabled = true;
+      setFeedback("Conveyor Mania is locked until new signage is added by the administrator.", "info");
+    }
 
     const initialActive = document.getElementById("view-conveyor")?.classList.contains("active");
     activateSection(Boolean(initialActive));

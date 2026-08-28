@@ -62,7 +62,7 @@
       completeBtn: byId("mg-complete-btn"),
       startBtn: byId("mg-start-btn"),
       nextLevelBtn: byId("mg-next-level-btn"),
-      difficultySelect: byId("mg-difficulty-select"),
+      difficultyCards: document.querySelectorAll("[data-memory-difficulty]"),
       mediumBuilder: byId("mg-medium-builder"),
       easyChoicesPanel: byId("mg-easy-choices"),
       easyChoices: byId("mg-easy-choice-options"),
@@ -102,8 +102,28 @@
   }
 
   function getSelectedDifficulty() {
-    const selected = refs.difficultySelect?.value || "";
+    const selected = document.querySelector("[data-memory-difficulty].is-selected")?.dataset.memoryDifficulty || "";
     return DIFFICULTY_MODE_MAP[selected] || null;
+  }
+
+  function resetRoundUI() {
+    clearTimers();
+    state.currentPlate = null;
+    state.isDisplaying = false;
+    state.isGuessing = false;
+    state.isCompleted = false;
+    refs.plateDisplay.style.display = 'grid';
+    refs.plateDisplay.querySelector('.plate-number').textContent = '---';
+    refs.inputContainer.style.display = 'none';
+    refs.easyChoicesPanel.style.display = 'none';
+    refs.mediumBuilder.style.display = 'none';
+    refs.userInputField.value = "";
+    refs.userInputField.disabled = true;
+    refs.completeBtn.disabled = true;
+    refs.nextLevelBtn.style.display = 'none';
+    refs.startBtn.disabled = false;
+    refs.displayTimer.textContent = formatTimer(0);
+    refs.guessTimer.textContent = formatTimer(0);
   }
 
   function applySelectedDifficulty() {
@@ -126,6 +146,7 @@
     state.completedLevels = 0;
     updateLevelDisplay();
     updateProgressUI();
+    resetRoundUI();
     refs.startBtn.disabled = false;
     setFeedback(`Mode selected: ${mode.label}. Click Start to begin.`, "info");
   }
@@ -518,7 +539,7 @@
     if (state.isCompleted) return;
     if (isActive) {
       refs.gameCard.classList.remove("is-disabled");
-      refs.startBtn.disabled = false;
+      refs.startBtn.disabled = !getSelectedDifficulty();
     } else {
       clearTimers();
       refs.gameCard.classList.add("is-disabled");
@@ -536,9 +557,11 @@
     refs.startBtn.addEventListener("click", startNewLevel);
     refs.completeBtn.addEventListener("click", checkAnswer);
     refs.nextLevelBtn.addEventListener("click", nextLevel);
-    refs.difficultySelect.addEventListener("change", () => {
+    refs.difficultyCards.forEach((card) => card.addEventListener("click", () => {
+      refs.difficultyCards.forEach((option) => option.classList.remove("is-selected"));
+      card.classList.add("is-selected");
       applySelectedDifficulty();
-    });
+    }));
 
     refs.userInputField.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !refs.completeBtn.disabled) {
