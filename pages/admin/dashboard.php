@@ -209,6 +209,38 @@ $month_only_digits = substr($selected_month, 5, 2);
 $lookup_key = date('Y') . '-' . $month_only_digits;
 $active_event_notice = $monthly_events[$lookup_key] ?? "No special community safety events registered for this selected month.";
 $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
+
+$user_progress_list = [];
+try {
+    $users_stmt = $db_connection->query("SELECT user_id, first_name, last_name, email FROM users WHERE is_admin = 0 ORDER BY last_name ASC, first_name ASC");
+    foreach ($users_stmt->fetchAll(PDO::FETCH_ASSOC) as $user_row) {
+        $user_progress_list[(int)$user_row['user_id']] = [
+            'name' => trim($user_row['first_name'] . ' ' . $user_row['last_name']),
+            'email' => $user_row['email'],
+            'games' => [],
+            'modules' => []
+        ];
+    }
+
+    $completed_games_stmt = $db_connection->query("SELECT p.user_id, p.game_name, p.completion_date FROM progress p INNER JOIN users u ON u.user_id = p.user_id WHERE u.is_admin = 0 AND p.stage_number = 0 AND p.is_completed = 1 AND p.game_name <> 'learning_module' ORDER BY p.completion_date DESC");
+    while ($game_row = $completed_games_stmt->fetch(PDO::FETCH_ASSOC)) {
+        $user_id = (int)$game_row['user_id'];
+        if (isset($user_progress_list[$user_id]) && !isset($user_progress_list[$user_id]['games'][$game_row['game_name']])) {
+            $user_progress_list[$user_id]['games'][$game_row['game_name']] = $game_row['completion_date'];
+        }
+    }
+
+    $module_progress_stmt = $db_connection->query("SELECT p.user_id, p.module_id, p.is_completed, p.progress_percent, p.completion_date, lm.chapter_number, lm.title FROM progress p INNER JOIN users u ON u.user_id = p.user_id INNER JOIN learning_modules lm ON lm.module_id = p.module_id WHERE u.is_admin = 0 AND p.game_name = 'learning_module' AND p.stage_number = 0 ORDER BY p.completion_date DESC");
+    while ($module_row = $module_progress_stmt->fetch(PDO::FETCH_ASSOC)) {
+        $user_id = (int)$module_row['user_id'];
+        $module_id = (int)$module_row['module_id'];
+        if (isset($user_progress_list[$user_id]) && !isset($user_progress_list[$user_id]['modules'][$module_id])) {
+            $user_progress_list[$user_id]['modules'][$module_id] = $module_row;
+        }
+    }
+} catch (PDOException $e) {
+    $feedback_message = "<div class='bg-amber-100 text-amber-800 p-3 rounded text-xs mb-4'>Notice: User progress details could not be loaded.</div>";
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -320,6 +352,74 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                             <div> 25-34: <span class="text-slate-800"><?php echo $age_25_34; ?></span></div>
                             <div> 35+: <span class="text-slate-800"><?php echo $age_above_35; ?></span></div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-5 border-b border-slate-100">
+                        <h4 class="text-sm font-black text-slate-800 uppercase tracking-wide">User Learning Progress</h4>
+                        <p class="text-[11px] text-slate-400 font-semibold mt-1">Review completed games and each user's learning module activity.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs min-w-[760px]">
+                            <thead class="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                                <tr>
+                                    <th class="p-3 font-black">User</th>
+                                    <th class="p-3 font-black">Completed Games</th>
+                                    <th class="p-3 font-black">Learning Modules</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <?php if (!empty($user_progress_list)): ?>
+                                    <?php foreach ($user_progress_list as $user_progress): ?>
+                                        <tr class="align-top hover:bg-slate-50">
+                                            <td class="p-3">
+                                                <div class="font-bold text-slate-800"><?php echo htmlspecialchars($user_progress['name'] !== '' ? $user_progress['name'] : 'Unnamed user'); ?></div>
+                                                <div class="text-[11px] text-slate-400"><?php echo htmlspecialchars($user_progress['email']); ?></div>
+                                            </td>
+                                            <td class="p-3">
+                                                <?php if (!empty($user_progress['games'])): ?>
+                                                    <div class="space-y-1">
+                                                        <?php foreach ($user_progress['games'] as $game_name => $completion_date): ?>
+                                                            <div class="flex items-center gap-2">
+                                                                <span class="inline-block h-2 w-2 rounded-full bg-emerald-500"></span>
+                                                                <span class="font-semibold text-slate-700"><?php echo htmlspecialchars(ucwords(str_replace(['_', '-'], ' ', $game_name))); ?></span>
+                                                                <span class="text-[10px] text-slate-400"><?php echo htmlspecialchars(date('M d, Y', strtotime($completion_date))); ?></span>
+                                                            </div>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <span class="text-slate-400 italic">No games completed</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="p-3">
+                                                <?php if (!empty($learning_modules_list)): ?>
+                                                    <div class="space-y-2">
+                                                        <?php foreach ($learning_modules_list as $module): ?>
+                                                            <?php $module_progress = $user_progress['modules'][(int)$module['module_id']] ?? null; ?>
+                                                            <?php $module_percent = $module_progress ? (int)round((float)$module_progress['progress_percent']) : 0; ?>
+                                                            <?php $module_completed = $module_progress && (int)$module_progress['is_completed'] === 1; ?>
+                                                            <div class="flex items-center justify-between gap-3">
+                                                                <span class="text-slate-700"><span class="font-bold">Ch. <?php echo (int)$module['chapter_number']; ?>:</span> <?php echo htmlspecialchars($module['title']); ?></span>
+                                                                <span class="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold <?php echo $module_completed ? 'bg-emerald-100 text-emerald-700' : ($module_progress ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'); ?>">
+                                                                    <?php echo $module_completed ? 'Completed' : ($module_progress ? 'Learning ' . $module_percent . '%' : 'Not started'); ?>
+                                                                </span>
+                                                            </div>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <span class="text-slate-400 italic">No learning modules published</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="3" class="p-6 text-center text-slate-400 italic">No registered users found.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
