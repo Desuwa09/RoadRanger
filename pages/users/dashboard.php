@@ -770,7 +770,12 @@
                 <div id="mg-plate-display"><span class="plate-number">---</span></div>
                 <div id="mg-input-container" style="display: none; text-align: center; margin: 20px 0;">
                     <label for="mg-user-input" style="display: block; font-weight: bold; margin-bottom: 8px;">Type the Plate Number:</label>
-                    <input type="text" id="mg-user-input" placeholder="ABC-1234" autocomplete="off" style="padding: 12px; font-size: 24px; font-weight: bold; text-align: center; text-transform: uppercase; letter-spacing: 2px; width: 80%; max-width: 300px; border: 2px solid #ced4da; border-radius: 6px;">
+                    <input type="text" id="mg-user-input" placeholder="ABC-123" autocomplete="off" style="padding: 12px; font-size: 24px; font-weight: bold; text-align: center; text-transform: uppercase; letter-spacing: 2px; width: 80%; max-width: 300px; border: 2px solid #ced4da; border-radius: 6px;">
+                </div>
+                <div id="mg-easy-choices" style="display: none; margin: 20px 0; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; text-align: center;">
+                    <div style="font-weight: bold; margin-bottom: 12px;">Choose the Complete Plate Number</div>
+                    <div style="margin-bottom: 10px; font-size: 13px; color: #475569;">Select the whole plate number that matches what you saw.</div>
+                    <div id="mg-easy-choice-options" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;"></div>
                 </div>
                 <div id="mg-medium-builder" style="display: none; margin: 20px 0; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; text-align: center;">
                     <div style="font-weight: bold; margin-bottom: 12px;">Choose the Exact Plate Parts</div>

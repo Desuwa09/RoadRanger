@@ -9,9 +9,9 @@
   const NUMBER_POOL = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   const DIFFICULTY_MODE_MAP = {
-    easy: { stage: 1, label: 'Easy', builder: false },
-    medium: { stage: 2, label: 'Medium', builder: true },
-    hard: { stage: 3, label: 'Hard', builder: true }
+    easy: { stage: 1, label: 'Easy', inputType: 'whole-plate' },
+    medium: { stage: 2, label: 'Medium', inputType: 'parts' },
+    hard: { stage: 3, label: 'Hard', inputType: 'typed' }
   };
 
   const state = {
@@ -64,6 +64,7 @@
       nextLevelBtn: byId("mg-next-level-btn"),
       difficultySelect: byId("mg-difficulty-select"),
       mediumBuilder: byId("mg-medium-builder"),
+      easyChoices: byId("mg-easy-choice-options"),
       builderSlotLabel: byId("mg-builder-slot-label"),
       letterSlots: byId("mg-letter-slots"),
       numberSlots: byId("mg-number-slots"),
@@ -81,7 +82,7 @@
       plate += letters.charAt(Math.floor(Math.random() * letters.length));
     }
     plate += '-';
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       plate += numbers.charAt(Math.floor(Math.random() * numbers.length));
     }
     return plate;
@@ -155,8 +156,36 @@
     const [plateLetters, plateNumbers] = plate.split("-");
     return {
       letters: buildChoicePool(plateLetters, 6, LETTER_POOL, 3),
-      numbers: buildChoicePool(plateNumbers, 6, NUMBER_POOL, 4)
+      numbers: buildChoicePool(plateNumbers, 6, NUMBER_POOL, 3)
     };
+  }
+
+  function generateWholePlateChoices(plate) {
+    const choices = [plate];
+    while (choices.length < 6) {
+      const candidate = generatePlateNumber();
+      if (!choices.includes(candidate)) choices.push(candidate);
+    }
+    return shuffleArray(choices);
+  }
+
+  function renderWholePlateChoices() {
+    refs.easyChoices.innerHTML = "";
+    state.builderChoices.wholePlates.forEach((plate) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = plate;
+      btn.style.padding = "10px 14px";
+      btn.style.borderRadius = "6px";
+      btn.style.border = "1px solid #bfdbfe";
+      btn.style.background = state.builderSelections.wholePlate === plate ? "#bfdbfe" : "#eff6ff";
+      btn.style.cursor = "pointer";
+      btn.addEventListener("click", () => {
+        state.builderSelections.wholePlate = plate;
+        renderWholePlateChoices();
+      });
+      refs.easyChoices.appendChild(btn);
+    });
   }
 
   function renderBuilderSlots() {
@@ -236,6 +265,7 @@
     state.activeBuilderSlot = "letters";
     state.builderSelections.letters = "";
     state.builderSelections.numbers = "";
+    state.builderSelections.wholePlate = "";
     state.builderChoices = generateBuilderChoices(state.currentPlate);
     renderBuilderSlots();
   }
@@ -298,15 +328,21 @@
     
     refs.plateDisplay.style.display = 'none';
     const mode = getSelectedDifficulty();
-    const usesBuilder = Boolean(mode && mode.builder);
+    const inputType = mode ? mode.inputType : 'typed';
 
-    refs.inputContainer.style.display = usesBuilder ? 'none' : 'block';
-    refs.mediumBuilder.style.display = usesBuilder ? 'block' : 'none';
+    refs.inputContainer.style.display = inputType === 'typed' ? 'block' : 'none';
+    refs.easyChoices.style.display = inputType === 'whole-plate' ? 'flex' : 'none';
+    refs.mediumBuilder.style.display = inputType === 'parts' ? 'block' : 'none';
 
-    if (usesBuilder) {
+    if (inputType === 'whole-plate') {
+      state.builderChoices.wholePlates = generateWholePlateChoices(state.currentPlate);
+      renderWholePlateChoices();
+      refs.completeBtn.disabled = false;
+      setFeedback(`Choose the complete plate number you just saw! ${state.guessTimeLeft} seconds remaining...`, "info");
+    } else if (inputType === 'parts') {
       resetBuilderSelections();
       refs.completeBtn.disabled = false;
-      setFeedback(`Build the plate number from the letter and number choices! ${state.guessTimeLeft} seconds remaining...`, "info");
+      setFeedback(`Choose the letter group and number group from the plate! ${state.guessTimeLeft} seconds remaining...`, "info");
     } else {
       refs.userInputField.disabled = false;
       refs.userInputField.focus();
@@ -327,15 +363,21 @@
 
   function checkAnswer() {
     const mode = getSelectedDifficulty();
-    const usesBuilder = Boolean(mode && mode.builder);
+    const inputType = mode ? mode.inputType : 'typed';
     let submittedAnswer = "";
 
-    if (usesBuilder) {
+    if (inputType === 'whole-plate') {
+      submittedAnswer = state.builderSelections.wholePlate.trim().toUpperCase();
+      if (!submittedAnswer) {
+        setFeedback("Please choose a complete plate number before submitting.", "error");
+        return;
+      }
+    } else if (inputType === 'parts') {
       const letterAnswer = state.builderSelections.letters.trim().toUpperCase();
       const numberAnswer = state.builderSelections.numbers.trim().toUpperCase();
       submittedAnswer = `${letterAnswer}-${numberAnswer}`;
 
-      if (!letterAnswer || !numberAnswer || letterAnswer.length < 3 || numberAnswer.length < 4) {
+      if (!letterAnswer || !numberAnswer || letterAnswer.length < 3 || numberAnswer.length < 3) {
         setFeedback("Please choose the correct letter group and number group before submitting.", "error");
         return;
       }
@@ -397,6 +439,7 @@
     state.totalLevels = STAGE_CONFIG[state.currentStage].levels;
     state.currentPlate = generatePlateNumber();
     state.builderChoices = generateBuilderChoices(state.currentPlate);
+    state.builderChoices.wholePlates = generateWholePlateChoices(state.currentPlate);
     state.isCompleted = false;
     
     refs.displayTimer.textContent = formatTimer(STAGE_CONFIG[state.currentStage].displayTime);
