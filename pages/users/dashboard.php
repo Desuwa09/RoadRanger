@@ -967,8 +967,7 @@
         }
     </script>
     <script>
-        const ROADRANGER_SAVE_URL = "<?php echo '/' . basename(dirname(dirname(__DIR__))) . '/pages/users/memory_progress.php'; ?>";
-        console.log("Global Application URL mapped as:", ROADRANGER_SAVE_URL);
+        const ROADRANGER_SAVE_URL = "memory_progress.php";
     </script>
     
     <script src="../../assets/js/memory_game.js?v=<?php echo time(); ?>"></script>

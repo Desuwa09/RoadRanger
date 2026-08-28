@@ -64,6 +64,7 @@
       nextLevelBtn: byId("mg-next-level-btn"),
       difficultySelect: byId("mg-difficulty-select"),
       mediumBuilder: byId("mg-medium-builder"),
+      easyChoicesPanel: byId("mg-easy-choices"),
       easyChoices: byId("mg-easy-choice-options"),
       builderSlotLabel: byId("mg-builder-slot-label"),
       letterSlots: byId("mg-letter-slots"),
@@ -331,7 +332,7 @@
     const inputType = mode ? mode.inputType : 'typed';
 
     refs.inputContainer.style.display = inputType === 'typed' ? 'block' : 'none';
-    refs.easyChoices.style.display = inputType === 'whole-plate' ? 'flex' : 'none';
+    refs.easyChoicesPanel.style.display = inputType === 'whole-plate' ? 'block' : 'none';
     refs.mediumBuilder.style.display = inputType === 'parts' ? 'block' : 'none';
 
     if (inputType === 'whole-plate') {
