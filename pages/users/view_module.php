@@ -174,40 +174,22 @@ try {
         <?php endif; ?>
 
         <?php if ($module_format === 'lesson' && is_array($module_data)): ?>
-            <div class="module-card" style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(96, 165, 250, 0.2);">
-                <div class="status-row">
-                    <span class="status-chip">Lesson overview</span>
+            <div class="chat-window" id="lesson-chat-window" style="margin-top: 12px;">
+                <div class="chat-header">
+                    <h3>Lesson conversation</h3>
                     <span class="status-chip">Pass requirement: <?php echo (int)($module_data['pass_score'] ?? 60); ?>%</span>
                 </div>
+                <div id="lesson-message-list" class="message-list"></div>
+                <div id="lesson-choices" class="choices"></div>
+            </div>
 
-                <div class="message" style="background: rgba(96, 165, 250, 0.12); border: 1px solid rgba(96, 165, 250, 0.35); color: #dbeafe;">
-                    <?php echo htmlspecialchars((string)($module_data['summary'] ?? $module['description'])); ?>
-                </div>
-
-                <?php if (!empty($module_data['cover_image'])): ?>
-                    <img src="<?php echo htmlspecialchars((string)$module_data['cover_image']); ?>" alt="Module cover" style="max-width:100%; border-radius:18px; margin-top:18px; border:1px solid rgba(148,163,184,0.25);" />
-                <?php endif; ?>
-
-                <?php foreach ((array)($module_data['content'] ?? []) as $section): ?>
-                    <div class="message" style="margin-top:18px; background: rgba(15,23,42,0.8); border: 1px solid rgba(148,163,184,0.18); color:#e2e8f0;">
-                        <h3 style="margin-top:0; color:#f8fafc; font-size:1.08rem;"><?php echo htmlspecialchars((string)($section['heading'] ?? 'Lesson point')); ?></h3>
-                        <p style="margin:0; line-height:1.8; color:#dbeafe;">
-                            <?php echo htmlspecialchars((string)($section['text'] ?? '')); ?>
-                        </p>
-                        <?php if (!empty($section['image'])): ?>
-                            <img src="<?php echo htmlspecialchars((string)$section['image']); ?>" alt="Lesson illustration" style="width:100%; max-width:520px; margin-top:12px; border-radius:14px; border:1px solid rgba(148,163,184,0.25);" />
-                        <?php endif; ?>
-                    </div>
-                <?php endforeach; ?>
-
-                <div id="lesson-quiz" style="margin-top:24px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(148, 163, 184, 0.18); border-radius:22px; padding:24px;">
-                    <h3 style="margin-top:0; color:#f8fafc; font-size:1.2rem;">Knowledge Check</h3>
-                    <p style="color:#cbd5e1; margin-bottom:16px;">Answer all questions. You must score at least <?php echo (int)($module_data['pass_score'] ?? 60); ?>% to complete this module.</p>
-                    <div id="quiz-container"></div>
-                    <div id="quiz-status" class="message" style="display:none; margin-top:16px;"></div>
-                    <div style="margin-top: 20px;">
-                        <button id="completeBtn" class="complete-btn" disabled>Finish Module</button>
-                    </div>
+            <div id="lesson-quiz" style="display:none; margin-top:24px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(148, 163, 184, 0.18); border-radius:22px; padding:24px;">
+                <h3 style="margin-top:0; color:#f8fafc; font-size:1.2rem;">Knowledge Check</h3>
+                <p style="color:#cbd5e1; margin-bottom:16px;">Answer all questions. You must score at least <?php echo (int)($module_data['pass_score'] ?? 60); ?>% to complete this module.</p>
+                <div id="quiz-container"></div>
+                <div id="quiz-status" class="message" style="display:none; margin-top:16px;"></div>
+                <div style="margin-top: 20px;">
+                    <button id="completeBtn" class="complete-btn" disabled>Finish Module</button>
                 </div>
             </div>
         <?php elseif (!$module_data || !isset($module_data['nodes']) || !is_array($module_data['nodes'])): ?>
@@ -374,9 +356,122 @@ async function saveModuleCompletion(extraData = {}) {
 if (moduleFormat === 'lesson') {
     const quizContainer = document.getElementById('quiz-container');
     const quizStatus = document.getElementById('quiz-status');
+    const lessonMessageList = document.getElementById('lesson-message-list');
+    const lessonChoices = document.getElementById('lesson-choices');
     const lessonQuestions = Array.isArray(moduleData?.quiz) ? moduleData.quiz : [];
     const answeredState = {};
-    const correctAnswers = {};
+    const lessonNodes = {};
+    const sections = Array.isArray(moduleData?.content) ? moduleData.content : [];
+
+    function createImageElement(src, alt) {
+        const imageEl = document.createElement('img');
+        imageEl.src = src;
+        imageEl.alt = alt;
+        imageEl.style.display = 'block';
+        imageEl.style.maxWidth = '100%';
+        imageEl.style.marginTop = '12px';
+        imageEl.style.borderRadius = '14px';
+        imageEl.style.border = '1px solid rgba(148, 163, 184, 0.25)';
+        imageEl.onerror = function() {
+            const fallback = document.createElement('div');
+            fallback.textContent = 'Lesson illustration unavailable.';
+            fallback.style.marginTop = '12px';
+            fallback.style.padding = '12px 14px';
+            fallback.style.borderRadius = '14px';
+            fallback.style.background = 'rgba(148, 163, 184, 0.12)';
+            fallback.style.color = '#cbd5e1';
+            fallback.style.fontSize = '0.85rem';
+            imageEl.replaceWith(fallback);
+        };
+        return imageEl;
+    }
+
+    function renderLessonChatEntry(text, sender, image = null) {
+        const bubble = document.createElement('div');
+        bubble.className = `message-bubble ${sender}`;
+        if (text) bubble.textContent = text;
+        if (image) bubble.appendChild(createImageElement(image, 'Lesson illustration'));
+        lessonMessageList.appendChild(bubble);
+        lessonMessageList.scrollTop = lessonMessageList.scrollHeight;
+    }
+
+    function buildLessonChatNodes() {
+        const nodes = {};
+        const summaryText = moduleData?.summary || moduleData?.title || 'Let’s begin this lesson.';
+        const startNode = {
+            bot_message: summaryText,
+            image: moduleData?.cover_image || null,
+            choices: [{ text: 'Start lesson', next_node: sections.length ? 'section-0' : 'quiz' }]
+        };
+        nodes.start = startNode;
+
+        sections.forEach((section, index) => {
+            const nextNode = index < sections.length - 1 ? `section-${index + 1}` : 'lesson-quiz-intro';
+            nodes[`section-${index}`] = {
+                bot_message: section.text || section.heading || 'Lesson point',
+                image: section.image || null,
+                choices: [{ text: 'Continue', next_node: nextNode }]
+            };
+        });
+
+        nodes['lesson-quiz-intro'] = {
+            bot_message: 'You reached the end of the lesson. Let’s check what you learned.',
+            image: null,
+            choices: [{ text: 'Start the test', next_node: 'quiz' }]
+        };
+
+        nodes.quiz = {
+            bot_message: 'Answer the questions below to finish this module.',
+            image: null,
+            choices: []
+        };
+
+        return nodes;
+    }
+
+    lessonNodes = buildLessonChatNodes();
+    let currentLessonNodeKey = 'start';
+
+    function renderLessonNode(nodeKey) {
+        const node = lessonNodes[nodeKey];
+        if (!node) return;
+
+        if (nodeKey === 'quiz') {
+            lessonChoices.innerHTML = '';
+            lessonMessageList.innerHTML = '';
+            renderLessonChatEntry(node.bot_message || 'Answer the questions below.', 'bot', node.image || null);
+            document.getElementById('lesson-quiz').style.display = 'block';
+            return;
+        }
+
+        lessonMessageList.innerHTML = '';
+        renderLessonChatEntry(node.bot_message || 'Lesson details.', 'bot', node.image || null);
+        lessonChoices.innerHTML = '';
+
+        if (!Array.isArray(node.choices) || !node.choices.length) {
+            return;
+        }
+
+        node.choices.forEach((choice) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'choice-btn';
+            button.textContent = choice.text || 'Continue';
+            button.onclick = () => {
+                renderLessonChatEntry(choice.text || 'Continue', 'user');
+                const nextKey = choice.next_node || 'quiz';
+                currentLessonNodeKey = nextKey;
+                if (nextKey === 'quiz') {
+                    lessonChoices.innerHTML = '';
+                    document.getElementById('lesson-quiz').style.display = 'block';
+                    renderLessonNode(nextKey);
+                    return;
+                }
+                renderLessonNode(nextKey);
+            };
+            lessonChoices.appendChild(button);
+        });
+    }
 
     function evaluateLessonQuiz() {
         const answeredCount = Object.keys(answeredState).length;
@@ -392,7 +487,6 @@ if (moduleFormat === 'lesson') {
             if (selectedIndex === undefined) return;
             const selectedOption = question.options?.[selectedIndex];
             const isCorrect = selectedOption && selectedOption.correct === true;
-            correctAnswers[index] = isCorrect;
             if (isCorrect) correctCount += 1;
         });
 
@@ -463,6 +557,8 @@ if (moduleFormat === 'lesson') {
             quizStatus.textContent = 'No quiz questions are available for this lesson yet.';
         }
     }
+
+    renderLessonNode('start');
 
     completeBtn?.addEventListener('click', () => {
         const total = lessonQuestions.length;
