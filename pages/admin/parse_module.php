@@ -85,6 +85,10 @@ function load_local_env_file() {
 
 load_local_env_file();
 
+if (function_exists('set_time_limit')) {
+    @set_time_limit(180);
+}
+
 $gemini_key = $GEMINI_API_KEY ?? getenv('GEMINI_API_KEY') ?? ($_ENV['GEMINI_API_KEY'] ?? '');
 
 if (!$gemini_key || trim((string)$gemini_key) === '') {
@@ -182,8 +186,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         curl_setopt($process, CURLOPT_POST, true);
         curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($payload_array));
         curl_setopt($process, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-        curl_setopt($process, CURLOPT_TIMEOUT, 180);
-        curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 20);
+        curl_setopt($process, CURLOPT_TIMEOUT, 75);
+        curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 15);
 
         $server_output = curl_exec($process);
 
@@ -316,8 +320,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     curl_setopt($process, CURLOPT_POST, true);
     curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($payload_array));
     curl_setopt($process, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-    curl_setopt($process, CURLOPT_TIMEOUT, 180);
-    curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 20);
+    curl_setopt($process, CURLOPT_TIMEOUT, 75);
+    curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 15);
     
     $server_output = curl_exec($process);
     
