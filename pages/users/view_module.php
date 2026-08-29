@@ -35,6 +35,23 @@ try {
             exit;
         }
 
+        $quiz_score = isset($_POST['quiz_score']) ? (float)$_POST['quiz_score'] : null;
+        $pass_score = isset($_POST['pass_score']) ? (float)$_POST['pass_score'] : 60.0;
+        $module_data = null;
+        $decoded = json_decode($module['module_data'], true);
+        if (is_array($decoded) && isset($decoded['content']) && is_array($decoded['content'])) {
+            $module_data = $decoded;
+        }
+
+        if ($module_data !== null && is_array($module_data) && isset($module_data['quiz'])) {
+            if ($quiz_score === null || $quiz_score < $pass_score) {
+                header('Content-Type: application/json');
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'You need at least ' . $pass_score . '% to finish this module.']);
+                exit;
+            }
+        }
+
         $completion_date = date('Y-m-d H:i:s');
         $progress_percent = 100.0;
         $is_completed = 1;
@@ -65,9 +82,13 @@ try {
 
     $module_data = null;
     $fallback_message = '';
+    $module_format = 'legacy';
     $decoded = json_decode($module['module_data'], true);
     if (is_array($decoded)) {
-        if (isset($decoded[$selected_lang]) && is_array($decoded[$selected_lang])) {
+        if (isset($decoded['content']) && is_array($decoded['content'])) {
+            $module_data = $decoded;
+            $module_format = 'lesson';
+        } elseif (isset($decoded[$selected_lang]) && is_array($decoded[$selected_lang])) {
             $module_data = $decoded[$selected_lang];
         } elseif (isset($decoded['en']) && is_array($decoded['en'])) {
             $module_data = $decoded['en'];
@@ -152,7 +173,44 @@ try {
             </div>
         <?php endif; ?>
 
-        <?php if (!$module_data || !isset($module_data['nodes']) || !is_array($module_data['nodes'])): ?>
+        <?php if ($module_format === 'lesson' && is_array($module_data)): ?>
+            <div class="module-card" style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(96, 165, 250, 0.2);">
+                <div class="status-row">
+                    <span class="status-chip">Lesson overview</span>
+                    <span class="status-chip">Pass requirement: <?php echo (int)($module_data['pass_score'] ?? 60); ?>%</span>
+                </div>
+
+                <div class="message" style="background: rgba(96, 165, 250, 0.12); border: 1px solid rgba(96, 165, 250, 0.35); color: #dbeafe;">
+                    <?php echo htmlspecialchars((string)($module_data['summary'] ?? $module['description'])); ?>
+                </div>
+
+                <?php if (!empty($module_data['cover_image'])): ?>
+                    <img src="<?php echo htmlspecialchars((string)$module_data['cover_image']); ?>" alt="Module cover" style="max-width:100%; border-radius:18px; margin-top:18px; border:1px solid rgba(148,163,184,0.25);" />
+                <?php endif; ?>
+
+                <?php foreach ((array)($module_data['content'] ?? []) as $section): ?>
+                    <div class="message" style="margin-top:18px; background: rgba(15,23,42,0.8); border: 1px solid rgba(148,163,184,0.18); color:#e2e8f0;">
+                        <h3 style="margin-top:0; color:#f8fafc; font-size:1.08rem;"><?php echo htmlspecialchars((string)($section['heading'] ?? 'Lesson point')); ?></h3>
+                        <p style="margin:0; line-height:1.8; color:#dbeafe;">
+                            <?php echo htmlspecialchars((string)($section['text'] ?? '')); ?>
+                        </p>
+                        <?php if (!empty($section['image'])): ?>
+                            <img src="<?php echo htmlspecialchars((string)$section['image']); ?>" alt="Lesson illustration" style="width:100%; max-width:520px; margin-top:12px; border-radius:14px; border:1px solid rgba(148,163,184,0.25);" />
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+
+                <div id="lesson-quiz" style="margin-top:24px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(148, 163, 184, 0.18); border-radius:22px; padding:24px;">
+                    <h3 style="margin-top:0; color:#f8fafc; font-size:1.2rem;">Knowledge Check</h3>
+                    <p style="color:#cbd5e1; margin-bottom:16px;">Answer all questions. You must score at least <?php echo (int)($module_data['pass_score'] ?? 60); ?>% to complete this module.</p>
+                    <div id="quiz-container"></div>
+                    <div id="quiz-status" class="message" style="display:none; margin-top:16px;"></div>
+                    <div style="margin-top: 20px;">
+                        <button id="completeBtn" class="complete-btn" disabled>Finish Module</button>
+                    </div>
+                </div>
+            </div>
+        <?php elseif (!$module_data || !isset($module_data['nodes']) || !is_array($module_data['nodes'])): ?>
             <div class="message">Module content is unavailable or invalid. Please contact the administrator.</div>
         <?php else: ?>
             <div class="chat-window">
@@ -174,6 +232,8 @@ try {
 <script>
 const moduleData = <?php echo json_encode($module_data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 const currentUserCompleted = <?php echo $is_completed ? 'true' : 'false'; ?>;
+const moduleFormat = <?php echo $module_format === 'lesson' ? '"lesson"' : '"legacy"'; ?>;
+const passScore = Number((moduleData && moduleData.pass_score) || 60);
 const messageList = document.getElementById('messageList');
 const choicesEl = document.getElementById('choices');
 const finishArea = document.getElementById('finishArea');
@@ -265,15 +325,18 @@ function renderNode(nodeKey) {
     });
 }
 
-async function saveModuleCompletion() {
+async function saveModuleCompletion(extraData = {}) {
     completeBtn.disabled = true;
     completeBtn.textContent = 'Saving...';
 
     try {
+        const payload = new URLSearchParams({ action: 'complete_module' });
+        Object.entries(extraData).forEach(([key, value]) => payload.append(key, String(value)));
+
         const response = await fetch(window.location.href, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ action: 'complete_module' })
+            body: payload
         });
 
         const data = await response.json();
@@ -282,21 +345,146 @@ async function saveModuleCompletion() {
         }
 
         isCompleted = true;
-        moduleStatus.textContent = 'Module progress saved successfully.';
-        moduleStatus.style.display = 'block';
-        completeBtn.disabled = true;
-        document.querySelector('.progress-fill').style.width = '100%';
-        document.querySelector('.progress-text').textContent = '100%';
+        if (moduleStatus) {
+            moduleStatus.textContent = 'Module progress saved successfully.';
+            moduleStatus.style.display = 'block';
+        }
+        if (completeBtn) {
+            completeBtn.disabled = true;
+        }
+        const progressFill = document.querySelector('.progress-fill');
+        if (progressFill) progressFill.style.width = '100%';
+        const progressText = document.querySelector('.progress-text');
+        if (progressText) progressText.textContent = '100%';
     } catch (error) {
-        moduleStatus.textContent = 'Error saving progress: ' + error.message;
-        moduleStatus.style.display = 'block';
-        completeBtn.disabled = false;
+        if (moduleStatus) {
+            moduleStatus.textContent = 'Error saving progress: ' + error.message;
+            moduleStatus.style.display = 'block';
+        }
+        if (completeBtn) {
+            completeBtn.disabled = false;
+        }
     } finally {
-        completeBtn.textContent = 'Mark as Completed';
+        if (completeBtn) {
+            completeBtn.textContent = 'Finish Module';
+        }
     }
 }
 
-if (moduleData && moduleData.nodes) {
+if (moduleFormat === 'lesson') {
+    const quizContainer = document.getElementById('quiz-container');
+    const quizStatus = document.getElementById('quiz-status');
+    const lessonQuestions = Array.isArray(moduleData?.quiz) ? moduleData.quiz : [];
+    const answeredState = {};
+    const correctAnswers = {};
+
+    function evaluateLessonQuiz() {
+        const answeredCount = Object.keys(answeredState).length;
+        const total = lessonQuestions.length;
+        if (!total) {
+            if (completeBtn) completeBtn.disabled = true;
+            return;
+        }
+
+        let correctCount = 0;
+        lessonQuestions.forEach((question, index) => {
+            const selectedIndex = answeredState[index];
+            if (selectedIndex === undefined) return;
+            const selectedOption = question.options?.[selectedIndex];
+            const isCorrect = selectedOption && selectedOption.correct === true;
+            correctAnswers[index] = isCorrect;
+            if (isCorrect) correctCount += 1;
+        });
+
+        const score = total ? Math.round((correctCount / total) * 100) : 0;
+        const passed = score >= passScore;
+        if (completeBtn) {
+            completeBtn.disabled = !(answeredCount === total && passed);
+        }
+
+        if (answeredCount === total) {
+            quizStatus.style.display = 'block';
+            quizStatus.textContent = passed
+                ? `You passed with ${score}% and are ready to finish the module.`
+                : `You scored ${score}%. You need ${passScore}% to finish this module.`;
+            if (!passed) {
+                quizStatus.style.background = 'rgba(239, 68, 68, 0.12)';
+                quizStatus.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                quizStatus.style.color = '#fecaca';
+            } else {
+                quizStatus.style.background = 'rgba(16, 185, 129, 0.12)';
+                quizStatus.style.borderColor = 'rgba(16, 185, 129, 0.35)';
+                quizStatus.style.color = '#d1fae5';
+            }
+        } else {
+            quizStatus.style.display = 'none';
+        }
+    }
+
+    if (quizContainer) {
+        lessonQuestions.forEach((question, questionIndex) => {
+            const questionCard = document.createElement('div');
+            questionCard.className = 'message';
+            questionCard.style.marginTop = '18px';
+            questionCard.innerHTML = `
+                <h4 style="margin:0 0 12px; color:#f8fafc;">${questionIndex + 1}. ${question.question}</h4>
+                <div class="choices" style="margin-top:0; grid-template-columns:1fr; gap:10px;"></div>
+                <div class="quiz-feedback" style="display:none; margin-top:12px; color:#dbeafe; font-size:0.9rem; line-height:1.6;"></div>
+            `;
+
+            const optionsWrap = questionCard.querySelector('.choices');
+            question.options.forEach((option, optionIndex) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'choice-btn';
+                button.textContent = option.text;
+                button.style.width = '100%';
+                button.addEventListener('click', () => {
+                    if (answeredState[questionIndex] !== undefined) return;
+                    answeredState[questionIndex] = optionIndex;
+                    Array.from(optionsWrap.children).forEach(child => child.disabled = true);
+                    const isCorrect = option.correct === true;
+                    const feedback = questionCard.querySelector('.quiz-feedback');
+                    feedback.style.display = 'block';
+                    feedback.textContent = isCorrect
+                        ? `Correct. ${question.explanation || 'This answer is correct for the lesson.'}`
+                        : `Not quite. ${question.explanation || 'Review the lesson content and try again.'}`;
+                    feedback.style.color = isCorrect ? '#d1fae5' : '#fecaca';
+                    evaluateLessonQuiz();
+                });
+                optionsWrap.appendChild(button);
+            });
+
+            quizContainer.appendChild(questionCard);
+        });
+
+        if (!lessonQuestions.length) {
+            quizStatus.style.display = 'block';
+            quizStatus.textContent = 'No quiz questions are available for this lesson yet.';
+        }
+    }
+
+    completeBtn?.addEventListener('click', () => {
+        const total = lessonQuestions.length;
+        let correct = 0;
+        lessonQuestions.forEach((question, index) => {
+            const selectedIndex = answeredState[index];
+            if (selectedIndex !== undefined && question.options?.[selectedIndex]?.correct) correct += 1;
+        });
+        const score = total ? Math.round((correct / total) * 100) : 0;
+        if (score < passScore) {
+            if (quizStatus) {
+                quizStatus.style.display = 'block';
+                quizStatus.style.background = 'rgba(239, 68, 68, 0.12)';
+                quizStatus.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                quizStatus.style.color = '#fecaca';
+                quizStatus.textContent = `You scored ${score}%. You need ${passScore}% to finish this module.`;
+            }
+            return;
+        }
+        saveModuleCompletion({ quiz_score: score, pass_score: passScore });
+    });
+} else if (moduleData && moduleData.nodes) {
     const startNode = getStartNode();
     if (startNode) {
         currentNodeKey = startNode;
@@ -312,7 +500,9 @@ if (moduleData && moduleData.nodes) {
     finishArea.style.display = 'none';
 }
 
-completeBtn?.addEventListener('click', saveModuleCompletion);
+if (moduleFormat !== 'lesson') {
+    completeBtn?.addEventListener('click', saveModuleCompletion);
+}
 </script>
 </body>
 </html>

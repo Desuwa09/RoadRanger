@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/module_schema.php';
 
 session_start();
 header('Content-Type: application/json');
@@ -259,25 +260,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $instructions = "You are an educational assistant for the RoadRangers platform. ";
-    $instructions .= "Convert the following raw traffic/driving rules into an interactive scenario-based branching chatbot dialogue tree. ";
-    $instructions .= "If the supplied source text or image contains a road sign, hazard, instruction, or scenario visual, include the relevant visual as an optional `image` field on the matching node using a valid data URL or public URL string. ";
-    $instructions .= "Strict Requirement: Your response must be purely raw JSON conforming EXACTLY to this schema outline, without markdown formatting blocks:\n";
+    $instructions .= "Convert the supplied driving rules, road sign material, or scenario details into a readable learning module for citizens. ";
+    $instructions .= "The output must be valid JSON only, with short plain-language sentences that are easy for everyday users to understand. ";
+    $instructions .= "Do not return a branching chatbot tree or raw node structure. Do not include markdown fences or code blocks. ";
+    $instructions .= "Return this schema exactly:\n";
     $instructions .= "{\n";
-    $instructions .= "  \"nodes\": {\n";
-    $instructions .= "    \"start\": {\n";
-    $instructions .= "      \"bot_message\": \"Scenario setup or lesson question text...\",\n";
-    $instructions .= "      \"image\": \"data:image/png;base64,...\" or \"https://example.com/sign.png\" (optional),\n";
-    $instructions .= "      \"choices\": [\n";
-    $instructions .= "        { \"text\": \"Option A text\", \"next_node\": \"node_a\", \"score_impact\": 10 },\n";
-    $instructions .= "        { \"text\": \"Option B text\", \"next_node\": \"node_b\", \"score_impact\": 0 }\n";
-    $instructions .= "      ]\n";
-    $instructions .= "    },\n";
-    $instructions .= "    \"node_a\": { \"bot_message\": \"Feedback text for picking A.\", \"image\": \"optional visual URL\", \"choices\": [] },\n";
-    $instructions .= "    \"node_b\": { \"bot_message\": \"Feedback text for picking B.\", \"choices\": [] }\n";
-    $instructions .= "  }\n";
+    $instructions .= "  \"title\": \"Short module title\",\n";
+    $instructions .= "  \"summary\": \"One or two easy sentences explaining the lesson.\",\n";
+    $instructions .= "  \"cover_image\": \"optional valid image URL or data URL\",\n";
+    $instructions .= "  \"content\": [\n";
+    $instructions .= "    { \"heading\": \"Key Rule\", \"text\": \"Simple sentence for the learner.\", \"image\": \"optional image URL\" },\n";
+    $instructions .= "    { \"heading\": \"What to do\", \"text\": \"Simple sentence for the learner.\", \"image\": \"optional image URL\" }\n";
+    $instructions .= "  ],\n";
+    $instructions .= "  \"quiz\": [\n";
+    $instructions .= "    {\n";
+    $instructions .= "      \"question\": \"Question for the lesson\",\n";
+    $instructions .= "      \"options\": [\n";
+    $instructions .= "        { \"text\": \"Correct answer\", \"correct\": true },\n";
+    $instructions .= "        { \"text\": \"Wrong answer\", \"correct\": false }\n";
+    $instructions .= "      ],\n";
+    $instructions .= "      \"explanation\": \"Brief reason for the correct answer.\"\n";
+    $instructions .= "    }\n";
+    $instructions .= "  ],\n";
+    $instructions .= "  \"pass_score\": 60\n";
     $instructions .= "}\n";
-    $instructions .= "Ensure the nodes flow logically. Final nodes must contain an empty choices array. Do not add any fields beyond this schema except an optional image field on a node. ";
-    $instructions .= "When an uploaded image is provided, use it to describe and reinforce the relevant lesson or decision point. Keep the image field as a valid string value only.";
+    $instructions .= "Rules: keep each lesson paragraph short, use everyday language, include 2 to 4 content sections, include 3 quiz questions unless the lesson is too short, include only one correct answer for each question, and add an image URL only when a road sign or visual is clearly relevant. If no image is relevant, set the image field to an empty string or omit it.";
 
     $system_part = array("parts" => array(array("text" => $instructions)));
     $content_parts = array(array("text" => "Analyze this LTO source reference text:\n\n" . $raw_lto_text));
@@ -359,11 +366,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($ai_json_payload !== null) {
         $trimmed_payload = trim($ai_json_payload);
-        if (json_decode($trimmed_payload, true) === null) {
+        $decoded_payload = json_decode($trimmed_payload, true);
+        if ($decoded_payload === null) {
             echo json_encode([
                 'error' => 'Gemini returned text that is not valid JSON. Please try again or copy the output manually.',
                 'debug_log' => substr($trimmed_payload, 0, 512)
             ]);
+            exit;
+        }
+
+        if (class_exists('RoadRanger\\ModuleSchema')) {
+            $normalized_payload = \RoadRanger\ModuleSchema::normalizeGeneratedModule(is_array($decoded_payload) ? $decoded_payload : [], 'Road Safety Lesson');
+            echo json_encode($normalized_payload);
             exit;
         }
 

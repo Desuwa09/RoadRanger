@@ -518,8 +518,9 @@ try {
                                 </div>
                                 <p class="text-[11px] text-slate-500 mt-3">After generating the English structure, click Translate to Tagalog to generate a second language version for this module.</p>
                                 <div class="mt-4">
-                                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Generated Module JSON</label>
-                                    <textarea id="live-tree-code-editor" rows="12" class="w-full mt-2 text-xs border border-slate-200 rounded p-3 focus:outline-none font-mono bg-slate-950 text-slate-100" placeholder="Generated module JSON appears here after Gemini AI processing..." readonly></textarea>
+                                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Generated Lesson Editor</label>
+                                    <div id="module-editor-panel" class="mt-2 space-y-4"></div>
+                                    <textarea id="live-tree-code-editor" rows="12" class="hidden w-full mt-2 text-xs border border-slate-200 rounded p-3 focus:outline-none font-mono bg-slate-950 text-slate-100" placeholder="Generated module JSON appears here after Gemini AI processing..." readonly></textarea>
                                 </div>
                             </div>
                     <div class="space-y-6">
@@ -766,6 +767,224 @@ try {
         }
         let interactiveModuleDataTree = null;
 
+        function buildEmptyModuleDraft() {
+            return {
+                title: '',
+                summary: '',
+                cover_image: '',
+                content: [{ heading: 'Key Rule', text: '', image: '' }],
+                quiz: [{
+                    question: '',
+                    options: [
+                        { text: '', correct: true },
+                        { text: '', correct: false },
+                        { text: '', correct: false },
+                        { text: '', correct: false }
+                    ],
+                    explanation: ''
+                }],
+                pass_score: 60
+            };
+        }
+
+        function normalizeModuleDraft(inputModule) {
+            const fallback = buildEmptyModuleDraft();
+            const safeModule = inputModule && typeof inputModule === 'object' ? inputModule : {};
+            const safeContent = Array.isArray(safeModule.content) && safeModule.content.length ? safeModule.content : fallback.content;
+            const safeQuiz = Array.isArray(safeModule.quiz) && safeModule.quiz.length ? safeModule.quiz : fallback.quiz;
+
+            return {
+                title: String(safeModule.title || ''),
+                summary: String(safeModule.summary || ''),
+                cover_image: String(safeModule.cover_image || ''),
+                content: safeContent.map((entry, index) => ({
+                    heading: String(entry?.heading || `Lesson Point ${index + 1}`),
+                    text: String(entry?.text || ''),
+                    image: String(entry?.image || '')
+                })),
+                quiz: safeQuiz.map((entry, index) => ({
+                    question: String(entry?.question || `Question ${index + 1}`),
+                    options: Array.isArray(entry?.options) && entry.options.length ? entry.options.map((option, optionIndex) => ({
+                        text: String(option?.text || `Option ${optionIndex + 1}`),
+                        correct: Boolean(option?.correct)
+                    })) : [
+                        { text: 'Correct answer', correct: true },
+                        { text: 'Wrong answer', correct: false },
+                        { text: 'Wrong answer', correct: false },
+                        { text: 'Wrong answer', correct: false }
+                    ],
+                    explanation: String(entry?.explanation || '')
+                })),
+                pass_score: Number(safeModule.pass_score || 60)
+            };
+        }
+
+        function renderModuleEditor(moduleToRender) {
+            const container = document.getElementById('module-editor-panel');
+            const hiddenJsonField = document.getElementById('hidden-submission-json-field');
+            if (!container) return;
+
+            const normalized = normalizeModuleDraft(moduleToRender);
+            interactiveModuleDataTree = normalized;
+
+            if (hiddenJsonField) {
+                hiddenJsonField.value = JSON.stringify(normalized);
+            }
+
+            const contentFields = normalized.content.map((section, sectionIndex) => `
+                <div class="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase text-slate-500">Lesson section ${sectionIndex + 1}</span>
+                        <button type="button" data-action="remove-content" data-index="${sectionIndex}" class="text-[10px] font-bold text-red-600 hover:text-red-700">Remove</button>
+                    </div>
+                    <input type="text" data-role="content-heading" data-index="${sectionIndex}" value="${escapeHtml(section.heading)}" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Section heading" />
+                    <textarea data-role="content-text" data-index="${sectionIndex}" rows="3" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Write a short, simple sentence for the learner.">${escapeHtml(section.text)}</textarea>
+                    <input type="url" data-role="content-image" data-index="${sectionIndex}" value="${escapeHtml(section.image)}" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Image URL or data URL (optional)" />
+                </div>
+            `).join('');
+
+            const quizFields = normalized.quiz.map((question, questionIndex) => `
+                <div class="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase text-slate-500">Quiz question ${questionIndex + 1}</span>
+                        <button type="button" data-action="remove-question" data-index="${questionIndex}" class="text-[10px] font-bold text-red-600 hover:text-red-700">Remove</button>
+                    </div>
+                    <textarea data-role="question-text" data-index="${questionIndex}" rows="2" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Quiz question">${escapeHtml(question.question)}</textarea>
+                    <div class="space-y-2">
+                        ${question.options.map((option, optionIndex) => `
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" data-role="question-correct" data-question-index="${questionIndex}" data-option-index="${optionIndex}" ${option.correct ? 'checked' : ''} class="h-4 w-4 text-emerald-600 rounded" />
+                                <input type="text" data-role="question-option" data-question-index="${questionIndex}" data-option-index="${optionIndex}" value="${escapeHtml(option.text)}" class="flex-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Answer option" />
+                            </div>
+                        `).join('')}
+                    </div>
+                    <textarea data-role="question-explanation" data-index="${questionIndex}" rows="2" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Why is this answer correct?">${escapeHtml(question.explanation)}</textarea>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="space-y-4 border border-slate-200 rounded-lg p-4 bg-white">
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Module title</label>
+                        <input type="text" id="module-title-input" value="${escapeHtml(normalized.title)}" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Example: Pedestrian Safety" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Simple summary</label>
+                        <textarea id="module-summary-input" rows="2" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Explain the lesson in one or two easy sentences.">${escapeHtml(normalized.summary)}</textarea>
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Cover image</label>
+                        <input type="url" id="module-cover-image-input" value="${escapeHtml(normalized.cover_image)}" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Cover image URL or data URL" />
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold uppercase text-slate-500">Lesson points</span>
+                            <button type="button" data-action="add-content" class="text-[10px] font-bold text-slate-700 hover:text-slate-900">+ Add section</button>
+                        </div>
+                        ${contentFields}
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold uppercase text-slate-500">Quiz</span>
+                            <button type="button" data-action="add-question" class="text-[10px] font-bold text-slate-700 hover:text-slate-900">+ Add question</button>
+                        </div>
+                        ${quizFields}
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Passing score</label>
+                        <input type="number" id="module-pass-score-input" min="1" max="100" value="${normalized.pass_score}" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" />
+                    </div>
+                </div>
+            `;
+
+            const syncDraftFromInputs = () => {
+                const nextState = normalizeModuleDraft(interactiveModuleDataTree);
+                nextState.title = document.getElementById('module-title-input')?.value || '';
+                nextState.summary = document.getElementById('module-summary-input')?.value || '';
+                nextState.cover_image = document.getElementById('module-cover-image-input')?.value || '';
+                nextState.pass_score = Number(document.getElementById('module-pass-score-input')?.value || 60);
+
+                nextState.content = Array.from(container.querySelectorAll('[data-role="content-heading"]')).map((headingInput, index) => ({
+                    heading: headingInput.value || `Lesson Point ${index + 1}`,
+                    text: container.querySelector(`[data-role="content-text"][data-index="${index}"]`)?.value || '',
+                    image: container.querySelector(`[data-role="content-image"][data-index="${index}"]`)?.value || ''
+                }));
+
+                nextState.quiz = Array.from(container.querySelectorAll('[data-role="question-text"]')).map((questionInput, questionIndex) => {
+                    const optionInputs = Array.from(container.querySelectorAll(`[data-role="question-option"][data-question-index="${questionIndex}"]`));
+                    const correctInputs = Array.from(container.querySelectorAll(`[data-role="question-correct"][data-question-index="${questionIndex}"]`));
+                    const options = optionInputs.map((optionInput, optionIndex) => ({
+                        text: optionInput.value || `Option ${optionIndex + 1}`,
+                        correct: Boolean(correctInputs[optionIndex]?.checked)
+                    }));
+
+                    return {
+                        question: questionInput.value || `Question ${questionIndex + 1}`,
+                        options,
+                        explanation: container.querySelector(`[data-role="question-explanation"][data-index="${questionIndex}"]`)?.value || ''
+                    };
+                });
+
+                interactiveModuleDataTree = nextState;
+                if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(nextState);
+                if (liveTreeEditor) liveTreeEditor.value = JSON.stringify(nextState, null, 2);
+            };
+
+            container.addEventListener('input', syncDraftFromInputs);
+            container.addEventListener('change', syncDraftFromInputs);
+            container.addEventListener('click', (event) => {
+                const trigger = event.target.closest('[data-action]');
+                if (!trigger) return;
+
+                const action = trigger.dataset.action;
+                if (action === 'add-content') {
+                    const nextContent = [...(interactiveModuleDataTree?.content || []), { heading: `Lesson Point ${((interactiveModuleDataTree?.content || []).length + 1)}`, text: '', image: '' }];
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, content: nextContent };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+
+                if (action === 'remove-content') {
+                    const targetIndex = Number(trigger.dataset.index || 0);
+                    const content = [...(interactiveModuleDataTree?.content || [])];
+                    content.splice(targetIndex, 1);
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, content: content.length ? content : [{ heading: 'Key Rule', text: '', image: '' }] };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+
+                if (action === 'add-question') {
+                    const nextQuestions = [...(interactiveModuleDataTree?.quiz || []), {
+                        question: `Question ${((interactiveModuleDataTree?.quiz || []).length + 1)}`,
+                        options: [
+                            { text: 'Correct answer', correct: true },
+                            { text: 'Wrong answer', correct: false },
+                            { text: 'Wrong answer', correct: false },
+                            { text: 'Wrong answer', correct: false }
+                        ],
+                        explanation: ''
+                    }];
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, quiz: nextQuestions };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+
+                if (action === 'remove-question') {
+                    const targetIndex = Number(trigger.dataset.index || 0);
+                    const questions = [...(interactiveModuleDataTree?.quiz || [])];
+                    questions.splice(targetIndex, 1);
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, quiz: questions.length ? questions : [{ question: 'Question 1', options: [{ text: 'Correct answer', correct: true }, { text: 'Wrong answer', correct: false }, { text: 'Wrong answer', correct: false }, { text: 'Wrong answer', correct: false }], explanation: '' }] };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+            });
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         const dropTarget = document.getElementById('drop-target-area');
         const dropZoneText = document.getElementById('drop-zone-text');
         const manualFileInputField = document.getElementById('txt-file-file-input');
@@ -907,15 +1126,14 @@ try {
                         const message = serverJsonOutput.error + (serverJsonOutput.raw_output ? '\n\nPreview: ' + serverJsonOutput.raw_output : '');
                         alert("AI Synthesis Fault Trace: " + message);
                     } else {
-                        interactiveModuleDataTree = serverJsonOutput;
+                        interactiveModuleDataTree = normalizeModuleDraft(serverJsonOutput);
                         if (liveTreeEditor) {
-                            liveTreeEditor.value = JSON.stringify(serverJsonOutput, null, 2);
-                            liveTreeEditor.removeAttribute('readonly');
+                            liveTreeEditor.value = JSON.stringify(interactiveModuleDataTree, null, 2);
                         }
-                        if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(serverJsonOutput);
+                        if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(interactiveModuleDataTree);
                         if (commitPublishBtn) commitPublishBtn.removeAttribute('disabled');
-                        renderEmulatorActiveNode("start");
-                        if (translateButton) translateButton.removeAttribute('disabled');
+                        renderModuleEditor(interactiveModuleDataTree);
+                        if (translateButton) translateButton.setAttribute('disabled', 'disabled');
                     }
                 } catch (err) {
                     console.error('JSON parse or network error:', err);
@@ -931,15 +1149,23 @@ try {
             liveTreeEditor.addEventListener('input', (event) => {
                 try {
                     const realTimeValidatedTree = JSON.parse(event.target.value);
-                    interactiveModuleDataTree = realTimeValidatedTree;
-                    if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(realTimeValidatedTree);
-                    renderEmulatorActiveNode("start");
+                    interactiveModuleDataTree = normalizeModuleDraft(realTimeValidatedTree);
+                    if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(interactiveModuleDataTree);
+                    renderModuleEditor(interactiveModuleDataTree);
                 } catch(exception) {}
             });
         }
 
         if (translateButton) {
             translateButton.addEventListener('click', async () => {
+                if (!interactiveModuleDataTree || !interactiveModuleDataTree.content) {
+                    return alert('Please generate a lesson before using the translation tool.');
+                }
+
+                if (!interactiveModuleDataTree.nodes && Array.isArray(interactiveModuleDataTree.content)) {
+                    return alert('This simplified lesson editor does not use the older JSON tree format. It is ready for direct publishing.');
+                }
+
                 if (!liveTreeEditor) {
                     return alert('The module editor is not available. Refresh the page and try again.');
                 }
