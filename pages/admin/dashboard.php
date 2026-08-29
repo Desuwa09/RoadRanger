@@ -40,12 +40,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_action'])) {
         $json_tree_string = $_POST['module_json'];
 
         try {
-            $insert_sql = "INSERT INTO learning_modules (chapter_number, title, description, module_data, created_by) VALUES (?, ?, ?, ?, ?)";
+            $certificate_template_path = null;
+            if (isset($_FILES['certificate_template']) && $_FILES['certificate_template']['error'] !== UPLOAD_ERR_NO_FILE) {
+                if ($_FILES['certificate_template']['error'] !== UPLOAD_ERR_OK) {
+                    throw new RuntimeException('The certificate template could not be uploaded.');
+                }
+
+                $certificate_extension = strtolower(pathinfo($_FILES['certificate_template']['name'], PATHINFO_EXTENSION));
+                $allowed_certificate_extensions = ['jpg', 'jpeg', 'png', 'webp'];
+                if (!in_array($certificate_extension, $allowed_certificate_extensions, true)) {
+                    throw new RuntimeException('Certificate templates must be JPG, PNG, or WEBP images.');
+                }
+
+                $certificate_upload_dir = __DIR__ . '/../../assets/imgs/Certificates/';
+                if (!is_dir($certificate_upload_dir) && !mkdir($certificate_upload_dir, 0755, true)) {
+                    throw new RuntimeException('The certificate upload directory could not be created.');
+                }
+
+                $certificate_filename = uniqid('certificate_', true) . '.' . $certificate_extension;
+                $certificate_target = $certificate_upload_dir . $certificate_filename;
+                if (!move_uploaded_file($_FILES['certificate_template']['tmp_name'], $certificate_target)) {
+                    throw new RuntimeException('The certificate template could not be saved.');
+                }
+                $certificate_template_path = '../../assets/imgs/Certificates/' . $certificate_filename;
+            }
+
+            $insert_sql = "INSERT INTO learning_modules (chapter_number, title, description, module_data, certificate_template, created_by) VALUES (?, ?, ?, ?, ?, ?)";
             $run_insert = $db_connection->prepare($insert_sql);
-            $run_insert->execute([$ch_num, $mod_title, $mod_desc, $json_tree_string, $_SESSION['user_id']]);
+            $run_insert->execute([$ch_num, $mod_title, $mod_desc, $json_tree_string, $certificate_template_path, $_SESSION['user_id']]);
             $feedback_message = "<div class='bg-green-100 border border-green-300 text-green-800 p-3 rounded mb-4 font-medium text-xs'>Success: Chapter " . $ch_num . " has been successfully published to the citizen portal!</div>";
         } catch (PDOException $ex) {
             $feedback_message = "<div class='bg-red-100 border border-red-300 text-red-800 p-3 rounded mb-4 font-medium text-xs'>Database Save Error: " . $ex->getMessage() . "</div>";
+        } catch (RuntimeException $ex) {
+            $feedback_message = "<div class='bg-red-100 border border-red-300 text-red-800 p-3 rounded mb-4 font-medium text-xs'>Certificate Upload Error: " . htmlspecialchars($ex->getMessage()) . "</div>";
         }
     }
 
@@ -71,6 +98,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['form_action'])) {
             $cleanup_sql = "DELETE FROM progress WHERE module_id = ? AND game_name = 'learning_module'";
             $cleanup_stmt = $db_connection->prepare($cleanup_sql);
             $cleanup_stmt->execute([$target_module_id]);
+
+            $certificate_cleanup_stmt = $db_connection->prepare("DELETE FROM certificates WHERE module_id = ?");
+            $certificate_cleanup_stmt->execute([$target_module_id]);
 
             $delete_sql = "DELETE FROM learning_modules WHERE module_id = ?";
             $run_delete = $db_connection->prepare($delete_sql);
@@ -168,7 +198,7 @@ try {
 }
 
 try {
-    $module_stmt = $db_connection->query("SELECT module_id, chapter_number, title, description, created_at FROM learning_modules ORDER BY chapter_number ASC, module_id DESC");
+    $module_stmt = $db_connection->query("SELECT module_id, chapter_number, title, description, certificate_template, created_at FROM learning_modules ORDER BY chapter_number ASC, module_id DESC");
     $learning_modules_list = $module_stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     
@@ -179,6 +209,38 @@ $month_only_digits = substr($selected_month, 5, 2);
 $lookup_key = date('Y') . '-' . $month_only_digits;
 $active_event_notice = $monthly_events[$lookup_key] ?? "No special community safety events registered for this selected month.";
 $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
+
+$user_progress_list = [];
+try {
+    $users_stmt = $db_connection->query("SELECT user_id, first_name, last_name, email FROM users WHERE is_admin = 0 ORDER BY last_name ASC, first_name ASC");
+    foreach ($users_stmt->fetchAll(PDO::FETCH_ASSOC) as $user_row) {
+        $user_progress_list[(int)$user_row['user_id']] = [
+            'name' => trim($user_row['first_name'] . ' ' . $user_row['last_name']),
+            'email' => $user_row['email'],
+            'games' => [],
+            'modules' => []
+        ];
+    }
+
+    $completed_games_stmt = $db_connection->query("SELECT p.user_id, p.game_name, p.completion_date FROM progress p INNER JOIN users u ON u.user_id = p.user_id WHERE u.is_admin = 0 AND p.stage_number = 0 AND p.is_completed = 1 AND p.game_name <> 'learning_module' ORDER BY p.completion_date DESC");
+    while ($game_row = $completed_games_stmt->fetch(PDO::FETCH_ASSOC)) {
+        $user_id = (int)$game_row['user_id'];
+        if (isset($user_progress_list[$user_id]) && !isset($user_progress_list[$user_id]['games'][$game_row['game_name']])) {
+            $user_progress_list[$user_id]['games'][$game_row['game_name']] = $game_row['completion_date'];
+        }
+    }
+
+    $module_progress_stmt = $db_connection->query("SELECT p.user_id, p.module_id, p.is_completed, p.progress_percent, p.completion_date, lm.chapter_number, lm.title FROM progress p INNER JOIN users u ON u.user_id = p.user_id INNER JOIN learning_modules lm ON lm.module_id = p.module_id WHERE u.is_admin = 0 AND p.game_name = 'learning_module' AND p.stage_number = 0 ORDER BY p.completion_date DESC");
+    while ($module_row = $module_progress_stmt->fetch(PDO::FETCH_ASSOC)) {
+        $user_id = (int)$module_row['user_id'];
+        $module_id = (int)$module_row['module_id'];
+        if (isset($user_progress_list[$user_id]) && !isset($user_progress_list[$user_id]['modules'][$module_id])) {
+            $user_progress_list[$user_id]['modules'][$module_id] = $module_row;
+        }
+    }
+} catch (PDOException $e) {
+    $feedback_message = "<div class='bg-amber-100 text-amber-800 p-3 rounded text-xs mb-4'>Notice: User progress details could not be loaded.</div>";
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -292,6 +354,74 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                         </div>
                     </div>
                 </div>
+
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-5 border-b border-slate-100">
+                        <h4 class="text-sm font-black text-slate-800 uppercase tracking-wide">User Learning Progress</h4>
+                        <p class="text-[11px] text-slate-400 font-semibold mt-1">Review completed games and each user's learning module activity.</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs min-w-[760px]">
+                            <thead class="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                                <tr>
+                                    <th class="p-3 font-black">User</th>
+                                    <th class="p-3 font-black">Completed Games</th>
+                                    <th class="p-3 font-black">Learning Modules</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                <?php if (!empty($user_progress_list)): ?>
+                                    <?php foreach ($user_progress_list as $user_progress): ?>
+                                        <tr class="align-top hover:bg-slate-50">
+                                            <td class="p-3">
+                                                <div class="font-bold text-slate-800"><?php echo htmlspecialchars($user_progress['name'] !== '' ? $user_progress['name'] : 'Unnamed user'); ?></div>
+                                                <div class="text-[11px] text-slate-400"><?php echo htmlspecialchars($user_progress['email']); ?></div>
+                                            </td>
+                                            <td class="p-3">
+                                                <?php if (!empty($user_progress['games'])): ?>
+                                                    <div class="space-y-1">
+                                                        <?php foreach ($user_progress['games'] as $game_name => $completion_date): ?>
+                                                            <div class="flex items-center gap-2">
+                                                                <span class="inline-block h-2 w-2 rounded-full bg-emerald-500"></span>
+                                                                <span class="font-semibold text-slate-700"><?php echo htmlspecialchars(ucwords(str_replace(['_', '-'], ' ', $game_name))); ?></span>
+                                                                <span class="text-[10px] text-slate-400"><?php echo htmlspecialchars(date('M d, Y', strtotime($completion_date))); ?></span>
+                                                            </div>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <span class="text-slate-400 italic">No games completed</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="p-3">
+                                                <?php if (!empty($learning_modules_list)): ?>
+                                                    <div class="space-y-2">
+                                                        <?php foreach ($learning_modules_list as $module): ?>
+                                                            <?php $module_progress = $user_progress['modules'][(int)$module['module_id']] ?? null; ?>
+                                                            <?php $module_percent = $module_progress ? (int)round((float)$module_progress['progress_percent']) : 0; ?>
+                                                            <?php $module_completed = $module_progress && (int)$module_progress['is_completed'] === 1; ?>
+                                                            <div class="flex items-center justify-between gap-3">
+                                                                <span class="text-slate-700"><span class="font-bold">Ch. <?php echo (int)$module['chapter_number']; ?>:</span> <?php echo htmlspecialchars($module['title']); ?></span>
+                                                                <span class="whitespace-nowrap rounded px-2 py-1 text-[10px] font-bold <?php echo $module_completed ? 'bg-emerald-100 text-emerald-700' : ($module_progress ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'); ?>">
+                                                                    <?php echo $module_completed ? 'Completed' : ($module_progress ? 'Learning ' . $module_percent . '%' : 'Not started'); ?>
+                                                                </span>
+                                                            </div>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <span class="text-slate-400 italic">No learning modules published</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="3" class="p-6 text-center text-slate-400 italic">No registered users found.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <div id="view-events" class="view-panel space-y-6 <?php echo $active_admin_tab !== 'view-events' ? 'hidden' : ''; ?>">
@@ -388,8 +518,9 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                                 </div>
                                 <p class="text-[11px] text-slate-500 mt-3">After generating the English structure, click Translate to Tagalog to generate a second language version for this module.</p>
                                 <div class="mt-4">
-                                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Generated Module JSON</label>
-                                    <textarea id="live-tree-code-editor" rows="12" class="w-full mt-2 text-xs border border-slate-200 rounded p-3 focus:outline-none font-mono bg-slate-950 text-slate-100" placeholder="Generated module JSON appears here after Gemini AI processing..." readonly></textarea>
+                                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Generated Lesson Editor</label>
+                                    <div id="module-editor-panel" class="mt-2 space-y-4"></div>
+                                    <textarea id="live-tree-code-editor" rows="12" class="hidden w-full mt-2 text-xs border border-slate-200 rounded p-3 focus:outline-none font-mono bg-slate-950 text-slate-100" placeholder="Generated module JSON appears here after Gemini AI processing..." readonly></textarea>
                                 </div>
                             </div>
                     <div class="space-y-6">
@@ -404,7 +535,7 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                             </div>
                         </div>
 
-                        <form action="" method="POST" class="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4">
+                        <form action="" method="POST" enctype="multipart/form-data" class="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4">
                             <input type="hidden" name="form_action" value="save_generated_tree">
                             <input type="hidden" id="hidden-submission-json-field" name="module_json">
                             <h3 class="text-sm font-black text-slate-900 uppercase border-b border-slate-100 pb-2">Step 4: Publication Panel</h3>
@@ -421,6 +552,11 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                             <div>
                                 <label class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Short Module Description</label>
                                 <input type="text" name="description" class="w-full border border-slate-200 rounded p-1.5 text-xs focus:outline-none" required placeholder="Ex: Learning road signs guidelines...">
+                            </div>
+                            <div>
+                                <label for="certificate_template" class="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Certificate Template (optional)</label>
+                                <input type="file" id="certificate_template" name="certificate_template" accept=".jpg,.jpeg,.png,.webp" class="w-full border border-slate-200 rounded p-1.5 text-xs focus:outline-none">
+                                <p class="text-[10px] text-slate-400 mt-1">Upload a certificate background image. The learner name and completion date will be placed on it.</p>
                             </div>
                             <button type="submit" id="commit-production-publish-btn" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase py-3 rounded tracking-wider transition shadow-md" disabled>Publish Module to Live System</button>
                         </form>
@@ -631,6 +767,224 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
         }
         let interactiveModuleDataTree = null;
 
+        function buildEmptyModuleDraft() {
+            return {
+                title: '',
+                summary: '',
+                cover_image: '',
+                content: [{ heading: 'Key Rule', text: '', image: '' }],
+                quiz: [{
+                    question: '',
+                    options: [
+                        { text: '', correct: true },
+                        { text: '', correct: false },
+                        { text: '', correct: false },
+                        { text: '', correct: false }
+                    ],
+                    explanation: ''
+                }],
+                pass_score: 60
+            };
+        }
+
+        function normalizeModuleDraft(inputModule) {
+            const fallback = buildEmptyModuleDraft();
+            const safeModule = inputModule && typeof inputModule === 'object' ? inputModule : {};
+            const safeContent = Array.isArray(safeModule.content) && safeModule.content.length ? safeModule.content : fallback.content;
+            const safeQuiz = Array.isArray(safeModule.quiz) && safeModule.quiz.length ? safeModule.quiz : fallback.quiz;
+
+            return {
+                title: String(safeModule.title || ''),
+                summary: String(safeModule.summary || ''),
+                cover_image: String(safeModule.cover_image || ''),
+                content: safeContent.map((entry, index) => ({
+                    heading: String(entry?.heading || `Lesson Point ${index + 1}`),
+                    text: String(entry?.text || ''),
+                    image: String(entry?.image || '')
+                })),
+                quiz: safeQuiz.map((entry, index) => ({
+                    question: String(entry?.question || `Question ${index + 1}`),
+                    options: Array.isArray(entry?.options) && entry.options.length ? entry.options.map((option, optionIndex) => ({
+                        text: String(option?.text || `Option ${optionIndex + 1}`),
+                        correct: Boolean(option?.correct)
+                    })) : [
+                        { text: 'Correct answer', correct: true },
+                        { text: 'Wrong answer', correct: false },
+                        { text: 'Wrong answer', correct: false },
+                        { text: 'Wrong answer', correct: false }
+                    ],
+                    explanation: String(entry?.explanation || '')
+                })),
+                pass_score: Number(safeModule.pass_score || 60)
+            };
+        }
+
+        function renderModuleEditor(moduleToRender) {
+            const container = document.getElementById('module-editor-panel');
+            const hiddenJsonField = document.getElementById('hidden-submission-json-field');
+            if (!container) return;
+
+            const normalized = normalizeModuleDraft(moduleToRender);
+            interactiveModuleDataTree = normalized;
+
+            if (hiddenJsonField) {
+                hiddenJsonField.value = JSON.stringify(normalized);
+            }
+
+            const contentFields = normalized.content.map((section, sectionIndex) => `
+                <div class="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase text-slate-500">Lesson section ${sectionIndex + 1}</span>
+                        <button type="button" data-action="remove-content" data-index="${sectionIndex}" class="text-[10px] font-bold text-red-600 hover:text-red-700">Remove</button>
+                    </div>
+                    <input type="text" data-role="content-heading" data-index="${sectionIndex}" value="${escapeHtml(section.heading)}" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Section heading" />
+                    <textarea data-role="content-text" data-index="${sectionIndex}" rows="3" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Write a short, simple sentence for the learner.">${escapeHtml(section.text)}</textarea>
+                    <input type="url" data-role="content-image" data-index="${sectionIndex}" value="${escapeHtml(section.image)}" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Image URL or data URL (optional)" />
+                </div>
+            `).join('');
+
+            const quizFields = normalized.quiz.map((question, questionIndex) => `
+                <div class="border border-slate-200 rounded-lg p-3 bg-slate-50 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase text-slate-500">Quiz question ${questionIndex + 1}</span>
+                        <button type="button" data-action="remove-question" data-index="${questionIndex}" class="text-[10px] font-bold text-red-600 hover:text-red-700">Remove</button>
+                    </div>
+                    <textarea data-role="question-text" data-index="${questionIndex}" rows="2" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Quiz question">${escapeHtml(question.question)}</textarea>
+                    <div class="space-y-2">
+                        ${question.options.map((option, optionIndex) => `
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" data-role="question-correct" data-question-index="${questionIndex}" data-option-index="${optionIndex}" ${option.correct ? 'checked' : ''} class="h-4 w-4 text-emerald-600 rounded" />
+                                <input type="text" data-role="question-option" data-question-index="${questionIndex}" data-option-index="${optionIndex}" value="${escapeHtml(option.text)}" class="flex-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Answer option" />
+                            </div>
+                        `).join('')}
+                    </div>
+                    <textarea data-role="question-explanation" data-index="${questionIndex}" rows="2" class="w-full border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Why is this answer correct?">${escapeHtml(question.explanation)}</textarea>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="space-y-4 border border-slate-200 rounded-lg p-4 bg-white">
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Module title</label>
+                        <input type="text" id="module-title-input" value="${escapeHtml(normalized.title)}" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Example: Pedestrian Safety" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Simple summary</label>
+                        <textarea id="module-summary-input" rows="2" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Explain the lesson in one or two easy sentences.">${escapeHtml(normalized.summary)}</textarea>
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Cover image</label>
+                        <input type="url" id="module-cover-image-input" value="${escapeHtml(normalized.cover_image)}" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" placeholder="Cover image URL or data URL" />
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold uppercase text-slate-500">Lesson points</span>
+                            <button type="button" data-action="add-content" class="text-[10px] font-bold text-slate-700 hover:text-slate-900">+ Add section</button>
+                        </div>
+                        ${contentFields}
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-bold uppercase text-slate-500">Quiz</span>
+                            <button type="button" data-action="add-question" class="text-[10px] font-bold text-slate-700 hover:text-slate-900">+ Add question</button>
+                        </div>
+                        ${quizFields}
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-slate-500">Passing score</label>
+                        <input type="number" id="module-pass-score-input" min="1" max="100" value="${normalized.pass_score}" class="w-full mt-1 border border-slate-200 rounded p-2 text-xs focus:outline-none" />
+                    </div>
+                </div>
+            `;
+
+            const syncDraftFromInputs = () => {
+                const nextState = normalizeModuleDraft(interactiveModuleDataTree);
+                nextState.title = document.getElementById('module-title-input')?.value || '';
+                nextState.summary = document.getElementById('module-summary-input')?.value || '';
+                nextState.cover_image = document.getElementById('module-cover-image-input')?.value || '';
+                nextState.pass_score = Number(document.getElementById('module-pass-score-input')?.value || 60);
+
+                nextState.content = Array.from(container.querySelectorAll('[data-role="content-heading"]')).map((headingInput, index) => ({
+                    heading: headingInput.value || `Lesson Point ${index + 1}`,
+                    text: container.querySelector(`[data-role="content-text"][data-index="${index}"]`)?.value || '',
+                    image: container.querySelector(`[data-role="content-image"][data-index="${index}"]`)?.value || ''
+                }));
+
+                nextState.quiz = Array.from(container.querySelectorAll('[data-role="question-text"]')).map((questionInput, questionIndex) => {
+                    const optionInputs = Array.from(container.querySelectorAll(`[data-role="question-option"][data-question-index="${questionIndex}"]`));
+                    const correctInputs = Array.from(container.querySelectorAll(`[data-role="question-correct"][data-question-index="${questionIndex}"]`));
+                    const options = optionInputs.map((optionInput, optionIndex) => ({
+                        text: optionInput.value || `Option ${optionIndex + 1}`,
+                        correct: Boolean(correctInputs[optionIndex]?.checked)
+                    }));
+
+                    return {
+                        question: questionInput.value || `Question ${questionIndex + 1}`,
+                        options,
+                        explanation: container.querySelector(`[data-role="question-explanation"][data-index="${questionIndex}"]`)?.value || ''
+                    };
+                });
+
+                interactiveModuleDataTree = nextState;
+                if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(nextState);
+                if (liveTreeEditor) liveTreeEditor.value = JSON.stringify(nextState, null, 2);
+            };
+
+            container.addEventListener('input', syncDraftFromInputs);
+            container.addEventListener('change', syncDraftFromInputs);
+            container.addEventListener('click', (event) => {
+                const trigger = event.target.closest('[data-action]');
+                if (!trigger) return;
+
+                const action = trigger.dataset.action;
+                if (action === 'add-content') {
+                    const nextContent = [...(interactiveModuleDataTree?.content || []), { heading: `Lesson Point ${((interactiveModuleDataTree?.content || []).length + 1)}`, text: '', image: '' }];
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, content: nextContent };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+
+                if (action === 'remove-content') {
+                    const targetIndex = Number(trigger.dataset.index || 0);
+                    const content = [...(interactiveModuleDataTree?.content || [])];
+                    content.splice(targetIndex, 1);
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, content: content.length ? content : [{ heading: 'Key Rule', text: '', image: '' }] };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+
+                if (action === 'add-question') {
+                    const nextQuestions = [...(interactiveModuleDataTree?.quiz || []), {
+                        question: `Question ${((interactiveModuleDataTree?.quiz || []).length + 1)}`,
+                        options: [
+                            { text: 'Correct answer', correct: true },
+                            { text: 'Wrong answer', correct: false },
+                            { text: 'Wrong answer', correct: false },
+                            { text: 'Wrong answer', correct: false }
+                        ],
+                        explanation: ''
+                    }];
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, quiz: nextQuestions };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+
+                if (action === 'remove-question') {
+                    const targetIndex = Number(trigger.dataset.index || 0);
+                    const questions = [...(interactiveModuleDataTree?.quiz || [])];
+                    questions.splice(targetIndex, 1);
+                    interactiveModuleDataTree = { ...interactiveModuleDataTree, quiz: questions.length ? questions : [{ question: 'Question 1', options: [{ text: 'Correct answer', correct: true }, { text: 'Wrong answer', correct: false }, { text: 'Wrong answer', correct: false }, { text: 'Wrong answer', correct: false }], explanation: '' }] };
+                    renderModuleEditor(interactiveModuleDataTree);
+                }
+            });
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         const dropTarget = document.getElementById('drop-target-area');
         const dropZoneText = document.getElementById('drop-zone-text');
         const manualFileInputField = document.getElementById('txt-file-file-input');
@@ -651,7 +1005,21 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
 
         function parseSelectedFileObject(fileObj) {
             if (!fileObj) return;
-            if (fileObj.type === "text/plain" || fileObj.name.endsWith('.txt')) {
+            pendingSourceImageData = null;
+            pendingSourceImageMime = 'image/png';
+
+            if (fileObj.type.startsWith('image/')) {
+                dropZoneText.innerText = "Reading image file: " + fileObj.name;
+                const docReader = new FileReader();
+                docReader.onload = function(evt) {
+                    pendingSourceImageData = evt.target.result;
+                    pendingSourceImageMime = fileObj.type || 'image/png';
+                    targetTextContentField.value = "Image reference attached: " + fileObj.name + "\n\nUse the visual as a scenario reference during module generation.";
+                    dropZoneText.innerText = "Successfully loaded image: " + fileObj.name;
+                };
+                docReader.readAsDataURL(fileObj);
+            }
+            else if (fileObj.type === "text/plain" || fileObj.name.endsWith('.txt')) {
                 dropZoneText.innerText = "Reading TXT file: " + fileObj.name;
                 const docReader = new FileReader();
                 docReader.onload = function(evt) { targetTextContentField.value = evt.target.result; };
@@ -665,6 +1033,21 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                         const typedarray = new Uint8Array(this.result);
                         const pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
                         let fullExtractedText = "";
+
+                        try {
+                            const firstPage = await pdfDoc.getPage(1);
+                            const viewport = firstPage.getViewport({ scale: 1.25 });
+                            const pageCanvas = document.createElement('canvas');
+                            const pageContext = pageCanvas.getContext('2d');
+                            pageCanvas.width = viewport.width;
+                            pageCanvas.height = viewport.height;
+                            await firstPage.render({ canvasContext: pageContext, viewport }).promise;
+                            pendingSourceImageData = pageCanvas.toDataURL('image/png');
+                            pendingSourceImageMime = 'image/png';
+                        } catch (pageRenderError) {
+                            console.warn('PDF preview extraction failed:', pageRenderError);
+                        }
+
                         for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
                             const activePage = await pdfDoc.getPage(pageNum);
                             const contentBlocks = await activePage.getTextContent();
@@ -680,9 +1063,12 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                 };
                 pdfReader.readAsArrayBuffer(fileObj);
             } else {
-                alert("File Format Exception: Supports .txt or .pdf formats.");
+                alert("File Format Exception: Supports .txt, .pdf, .png, .jpg, or .jpeg formats.");
             }
         }
+
+        let pendingSourceImageData = null;
+        let pendingSourceImageMime = 'image/png';
 
         const parseButton = document.getElementById('trigger-ai-parse-btn');
         const liveTreeEditor = document.getElementById('live-tree-code-editor');
@@ -718,16 +1104,21 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
 
                 const packagePayload = new FormData();
                 packagePayload.append('content', targetTextInputData);
+                if (pendingSourceImageData) {
+                    packagePayload.append('image_data', pendingSourceImageData);
+                    packagePayload.append('image_mime_type', pendingSourceImageMime || 'image/png');
+                }
 
                 try {
                     const responseStream = await fetch('parse_module.php', { method: 'POST', body: packagePayload });
+                    const rawResponseText = await responseStream.text();
                     let serverJsonOutput;
                     try {
-                        serverJsonOutput = await responseStream.json();
+                        serverJsonOutput = JSON.parse(rawResponseText);
                     } catch (parseError) {
-                        const rawText = await responseStream.text();
-                        console.error('parse_module raw response:', rawText);
-                        alert('AI Synthesis Fault Trace: Unable to parse the Gemini response. Check the browser console for the raw output.');
+                        const responsePreview = rawResponseText.replace(/\s+/g, ' ').trim().slice(0, 500);
+                        console.error('parse_module response:', responseStream.status, rawResponseText);
+                        alert('AI Synthesis Fault Trace: The server returned invalid JSON (HTTP ' + responseStream.status + ').\n\nResponse: ' + responsePreview);
                         return;
                     }
 
@@ -735,15 +1126,14 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
                         const message = serverJsonOutput.error + (serverJsonOutput.raw_output ? '\n\nPreview: ' + serverJsonOutput.raw_output : '');
                         alert("AI Synthesis Fault Trace: " + message);
                     } else {
-                        interactiveModuleDataTree = serverJsonOutput;
+                        interactiveModuleDataTree = normalizeModuleDraft(serverJsonOutput);
                         if (liveTreeEditor) {
-                            liveTreeEditor.value = JSON.stringify(serverJsonOutput, null, 2);
-                            liveTreeEditor.removeAttribute('readonly');
+                            liveTreeEditor.value = JSON.stringify(interactiveModuleDataTree, null, 2);
                         }
-                        if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(serverJsonOutput);
+                        if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(interactiveModuleDataTree);
                         if (commitPublishBtn) commitPublishBtn.removeAttribute('disabled');
-                        renderEmulatorActiveNode("start");
-                        if (translateButton) translateButton.removeAttribute('disabled');
+                        renderModuleEditor(interactiveModuleDataTree);
+                        if (translateButton) translateButton.setAttribute('disabled', 'disabled');
                     }
                 } catch (err) {
                     console.error('JSON parse or network error:', err);
@@ -759,15 +1149,23 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
             liveTreeEditor.addEventListener('input', (event) => {
                 try {
                     const realTimeValidatedTree = JSON.parse(event.target.value);
-                    interactiveModuleDataTree = realTimeValidatedTree;
-                    if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(realTimeValidatedTree);
-                    renderEmulatorActiveNode("start");
+                    interactiveModuleDataTree = normalizeModuleDraft(realTimeValidatedTree);
+                    if (hiddenJsonField) hiddenJsonField.value = JSON.stringify(interactiveModuleDataTree);
+                    renderModuleEditor(interactiveModuleDataTree);
                 } catch(exception) {}
             });
         }
 
         if (translateButton) {
             translateButton.addEventListener('click', async () => {
+                if (!interactiveModuleDataTree || !interactiveModuleDataTree.content) {
+                    return alert('Please generate a lesson before using the translation tool.');
+                }
+
+                if (!interactiveModuleDataTree.nodes && Array.isArray(interactiveModuleDataTree.content)) {
+                    return alert('This simplified lesson editor does not use the older JSON tree format. It is ready for direct publishing.');
+                }
+
                 if (!liveTreeEditor) {
                     return alert('The module editor is not available. Refresh the page and try again.');
                 }
@@ -839,6 +1237,17 @@ $active_admin_tab = $_GET['tab'] ?? 'view-analytics';
             messageBubbleElement.className = "bg-slate-800 text-slate-100 p-2.5 rounded-lg rounded-tl-none self-start max-w-[90%] shadow-sm leading-snug font-medium";
             messageBubbleElement.innerText = currentActiveNodeData.bot_message;
             mainViewportTray.appendChild(messageBubbleElement);
+
+            if (currentActiveNodeData.image) {
+                const imageElement = document.createElement('img');
+                imageElement.src = currentActiveNodeData.image;
+                imageElement.alt = 'Module visual';
+                imageElement.style.maxWidth = '100%';
+                imageElement.style.borderRadius = '12px';
+                imageElement.style.marginTop = '8px';
+                imageElement.style.border = '1px solid rgba(148, 163, 184, 0.35)';
+                mainViewportTray.appendChild(imageElement);
+            }
 
             if(currentActiveNodeData.choices && currentActiveNodeData.choices.length > 0) {
                 currentActiveNodeData.choices.forEach(optionObject => {

@@ -46,6 +46,8 @@ CREATE TABLE `ai_generation_logs` (
 CREATE TABLE `certificates` (
   `certificate_id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
+  `module_id` int(11) NOT NULL,
+  `recipient_name` varchar(201) NOT NULL,
   `certificate_code` varchar(100) DEFAULT NULL,
   `issue_date` datetime DEFAULT NULL,
   `email_sent` tinyint(1) DEFAULT NULL,
@@ -143,6 +145,7 @@ CREATE TABLE `learning_modules` (
   `title` varchar(255) NOT NULL,
   `description` text DEFAULT NULL,
   `module_data` longtext NOT NULL,
+  `certificate_template` varchar(255) DEFAULT NULL,
   `created_by` int(11) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
@@ -271,7 +274,9 @@ ALTER TABLE `ai_generation_logs`
 --
 ALTER TABLE `certificates`
   ADD PRIMARY KEY (`certificate_id`),
-  ADD KEY `fk_certificates_user` (`user_id`);
+  ADD UNIQUE KEY `uq_certificates_user_module` (`user_id`,`module_id`),
+  ADD KEY `fk_certificates_user` (`user_id`),
+  ADD KEY `fk_certificates_module` (`module_id`);
 
 --
 -- Indexes for table `games`
@@ -399,7 +404,8 @@ ALTER TABLE `ai_generation_logs`
 -- Constraints for table `certificates`
 --
 ALTER TABLE `certificates`
-  ADD CONSTRAINT `fk_certificates_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE;
+  ADD CONSTRAINT `fk_certificates_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_certificates_module` FOREIGN KEY (`module_id`) REFERENCES `learning_modules` (`module_id`) ON DELETE CASCADE;
 
 --
 -- Constraints for table `game_items`

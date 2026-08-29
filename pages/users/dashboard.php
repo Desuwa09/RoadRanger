@@ -70,8 +70,12 @@
     $hazard_modules = [];
     $learning_modules = [];
     $memory_progress = ['percent' => 0, 'is_completed' => 0];
+    $memory_progress_by_stage = [];
     $conveyor_progress = ['percent' => 0, 'is_completed' => 0];
+    $conveyor_signs = [];
     $module_stats = ['total' => 0, 'completed' => 0];
+    $certificate_modules = [];
+    $conveyor_game_locked = false;
     try {
         
         $player_difficulty = $user['current_difficulty'] ?? 'EASY';
@@ -88,9 +92,13 @@
         $module_stmt->execute([$player_difficulty]);
         $hazard_modules = $module_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $learning_stmt = $conn->prepare("SELECT lm.module_id, lm.chapter_number, lm.title, lm.description, lm.created_at, COALESCE(p.progress_percent, 0) AS progress_percent, COALESCE(p.is_completed, 0) AS is_completed FROM learning_modules lm LEFT JOIN progress p ON p.module_id = lm.module_id AND p.user_id = ? AND p.game_name = 'learning_module' AND p.stage_number = 0 ORDER BY lm.chapter_number ASC, lm.module_id ASC");
+        $learning_stmt = $conn->prepare("SELECT lm.module_id, lm.chapter_number, lm.title, lm.description, lm.created_at, lm.certificate_template, COALESCE(p.progress_percent, 0) AS progress_percent, COALESCE(p.is_completed, 0) AS is_completed FROM learning_modules lm LEFT JOIN progress p ON p.module_id = lm.module_id AND p.user_id = ? AND p.game_name = 'learning_module' AND p.stage_number = 0 ORDER BY lm.chapter_number ASC, lm.module_id ASC");
         $learning_stmt->execute([$user_id]);
         $learning_modules = $learning_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $certificate_stmt = $conn->prepare("SELECT lm.module_id, lm.title, lm.certificate_template, COALESCE(p.is_completed, 0) AS is_completed, c.certificate_id, c.issue_date FROM learning_modules lm LEFT JOIN progress p ON p.module_id = lm.module_id AND p.user_id = ? AND p.game_name = 'learning_module' AND p.stage_number = 0 LEFT JOIN certificates c ON c.module_id = lm.module_id AND c.user_id = ? WHERE lm.certificate_template IS NOT NULL AND lm.certificate_template <> '' ORDER BY lm.chapter_number ASC, lm.module_id ASC");
+        $certificate_stmt->execute([$user_id, $user_id]);
+        $certificate_modules = $certificate_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $memory_stmt = $conn->prepare("SELECT progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'memory_game' AND stage_number = 0 LIMIT 1");
         $memory_stmt->execute([$user_id]);
@@ -100,6 +108,15 @@
             $memory_progress['is_completed'] = intval($memory_progress_row['is_completed'] ?? 0);
         }
 
+        $memory_stage_stmt = $conn->prepare("SELECT stage_number, progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'memory_game' AND stage_number BETWEEN 1 AND 3 ORDER BY stage_number ASC");
+        $memory_stage_stmt->execute([$user_id]);
+        while ($memory_stage_row = $memory_stage_stmt->fetch(PDO::FETCH_ASSOC)) {
+            $memory_progress_by_stage[(int)$memory_stage_row['stage_number']] = [
+                'percent' => (float)($memory_stage_row['progress_percent'] ?? 0),
+                'is_completed' => (int)($memory_stage_row['is_completed'] ?? 0)
+            ];
+        }
+
         $conveyor_stmt = $conn->prepare("SELECT progress_percent, is_completed FROM progress WHERE user_id = ? AND game_name = 'conveyor_mania' AND stage_number = 0 LIMIT 1");
         $conveyor_stmt->execute([$user_id]);
         $conveyor_progress_row = $conveyor_stmt->fetch(PDO::FETCH_ASSOC);
@@ -107,6 +124,19 @@
             $conveyor_progress['percent'] = intval($conveyor_progress_row['progress_percent'] ?? 0);
             $conveyor_progress['is_completed'] = intval($conveyor_progress_row['is_completed'] ?? 0);
         }
+
+        $conveyor_version_stmt = $conn->prepare("SELECT MAX(gl.created_at) AS latest_signage_at FROM game_levels gl JOIN games g ON gl.game_id = g.game_id WHERE g.game_key = 'conveyor_game'");
+        $conveyor_version_stmt->execute();
+        $latest_signage_at = $conveyor_version_stmt->fetchColumn();
+
+        $conveyor_completion_stmt = $conn->prepare("SELECT completion_date FROM progress WHERE user_id = ? AND game_name = 'conveyor_mania' AND stage_number = 0 AND is_completed = 1 ORDER BY completion_date DESC LIMIT 1");
+        $conveyor_completion_stmt->execute([$user_id]);
+        $conveyor_completion_at = $conveyor_completion_stmt->fetchColumn();
+
+        $conveyor_game_locked = (bool)$conveyor_completion_at && (!$latest_signage_at || strtotime($conveyor_completion_at) >= strtotime($latest_signage_at));
+
+        $conveyor_signs_stmt = $conn->query("SELECT gi.item_id, gi.item_label, gi.item_image, gi.target_category FROM game_items gi JOIN game_levels gl ON gi.level_id = gl.level_id JOIN games g ON gl.game_id = g.game_id WHERE g.game_key = 'conveyor_game' AND gi.item_image IS NOT NULL AND gi.item_image <> '' ORDER BY gl.created_at ASC, gi.item_id ASC");
+        $conveyor_signs = $conveyor_signs_stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $module_count_stmt = $conn->prepare("SELECT COUNT(*) AS total_modules FROM learning_modules");
         $module_count_stmt->execute();
@@ -287,6 +317,48 @@
         .mg-feedback.info, .cm-feedback.info { background: #d1ecf1; color: #0c5460; }
         .mg-feedback.success, .cm-feedback.success { background: #d4edda; color: #155724; }
         .mg-feedback.error, .cm-feedback.error { background: #f8d7da; color: #721c24; }
+        .cm-lock-message {
+            margin: 12px 0;
+            padding: 12px;
+            border: 1px solid #f0c36d;
+            border-radius: 4px;
+            background: #fff3cd;
+            color: #856404;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .cm-sign-reference { margin: 16px 0; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; }
+        .cm-sign-reference summary { padding: 12px; cursor: pointer; font-weight: bold; color: #1e3a5f; }
+        .cm-reference-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 0 12px 12px; }
+        .cm-reference-item { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 4px; background: white; }
+        .cm-reference-item img { width: 42px; height: 42px; object-fit: contain; }
+        .cm-reference-item span { display: flex; flex-direction: column; font-size: 12px; }
+        .cm-reference-item small { color: #64748b; text-transform: capitalize; }
+        .cm-reference-item p { margin: 3px 0 0; color: #475569; font-size: 11px; line-height: 1.35; }
+        @media (max-width: 640px) { .cm-reference-list { grid-template-columns: 1fr; } }
+        .memory-difficulty-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin: 22px 0 12px;
+        }
+        .memory-difficulty-card {
+            border: 2px solid #dbe3ea;
+            border-radius: 8px;
+            padding: 16px 12px;
+            background: #f8fafc;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, transform 0.2s;
+        }
+        .memory-difficulty-card:hover { border-color: #3498db; transform: translateY(-2px); }
+        .memory-difficulty-card.is-selected { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 2px #bfdbfe; }
+        .memory-difficulty-card.recommended { border-color: #f59e0b; }
+        .memory-difficulty-card.recommended.is-selected { border-color: #d97706; background: #fffbeb; box-shadow: 0 0 0 2px #fde68a; }
+        .memory-difficulty-card h3 { margin: 0 0 6px; font-size: 16px; }
+        .memory-difficulty-card p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.4; }
+        .memory-recommendation { margin-top: 8px; color: #b45309; font-size: 11px; font-weight: bold; }
+        @media (max-width: 640px) { .memory-difficulty-grid { grid-template-columns: 1fr; } }
         
         .game-controls button {
             padding: 10px 20px; font-size: 14px; font-weight: bold;
@@ -717,6 +789,35 @@
                     </div>
                 </form>
             </div>
+
+            <div class="profile-settings-card">
+                <h3>Certificates</h3>
+                <?php if (empty($certificate_modules)): ?>
+                    <p style="color: #6c757d;">Certificates will appear here when an administrator attaches one to a learning module.</p>
+                <?php else: ?>
+                    <?php foreach ($certificate_modules as $certificate_module): ?>
+                        <div class="data-row" style="display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap;">
+                            <div>
+                                <strong><?php echo htmlspecialchars($certificate_module['title']); ?></strong>
+                                <div style="font-size: 13px; color: #6c757d; margin-top: 4px;">
+                                    <?php if ($certificate_module['certificate_id']): ?>
+                                        Claimed on <?php echo date('M d, Y', strtotime($certificate_module['issue_date'])); ?>
+                                    <?php elseif (intval($certificate_module['is_completed'])): ?>
+                                        Completed and ready to claim
+                                    <?php else: ?>
+                                        Complete this module to unlock the certificate
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <?php if ($certificate_module['certificate_id']): ?>
+                                <a href="certificate.php?certificate_id=<?php echo intval($certificate_module['certificate_id']); ?>" target="_blank" rel="noopener" class="profile-form-actions button" style="background: #198754; color: white; padding: 9px 13px; border-radius: 6px; text-decoration: none; font-size: 13px;">View Certificate</a>
+                            <?php elseif (intval($certificate_module['is_completed'])): ?>
+                                <a href="certificate.php?action=claim&module_id=<?php echo intval($certificate_module['module_id']); ?>" class="profile-form-actions button" style="background: #007bff; color: white; padding: 9px 13px; border-radius: 6px; text-decoration: none; font-size: 13px;">Claim Certificate</a>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
         </div>
 
         <div id="view-memory" class="app-view">
@@ -736,7 +837,12 @@
                 <div id="mg-plate-display"><span class="plate-number">---</span></div>
                 <div id="mg-input-container" style="display: none; text-align: center; margin: 20px 0;">
                     <label for="mg-user-input" style="display: block; font-weight: bold; margin-bottom: 8px;">Type the Plate Number:</label>
-                    <input type="text" id="mg-user-input" placeholder="ABC-1234" autocomplete="off" style="padding: 12px; font-size: 24px; font-weight: bold; text-align: center; text-transform: uppercase; letter-spacing: 2px; width: 80%; max-width: 300px; border: 2px solid #ced4da; border-radius: 6px;">
+                    <input type="text" id="mg-user-input" placeholder="ABC-123" autocomplete="off" style="padding: 12px; font-size: 24px; font-weight: bold; text-align: center; text-transform: uppercase; letter-spacing: 2px; width: 80%; max-width: 300px; border: 2px solid #ced4da; border-radius: 6px;">
+                </div>
+                <div id="mg-easy-choices" style="display: none; margin: 20px 0; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; text-align: center;">
+                    <div style="font-weight: bold; margin-bottom: 12px;">Choose the Complete Plate Number</div>
+                    <div style="margin-bottom: 10px; font-size: 13px; color: #475569;">Select the whole plate number that matches what you saw.</div>
+                    <div id="mg-easy-choice-options" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;"></div>
                 </div>
                 <div id="mg-medium-builder" style="display: none; margin: 20px 0; padding: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; text-align: center;">
                     <div style="font-weight: bold; margin-bottom: 12px;">Choose the Exact Plate Parts</div>
@@ -757,14 +863,26 @@
                         </div>
                     </div>
                 </div>
-                <div style="margin: 12px 0 8px 0; text-align: center;">
-                    <label for="mg-difficulty-select" style="display: block; font-weight: bold; margin-bottom: 6px;">Select Mode</label>
-                    <select id="mg-difficulty-select" style="padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1; min-width: 220px; text-align: center;">
-                        <option value="">Choose Easy / Medium / Hard</option>
-                        <option value="easy">Easy</option>
-                        <option value="medium">Medium</option>
-                        <option value="hard">Hard</option>
-                    </select>
+                <div style="margin: 22px 0 8px; text-align: center;">
+                    <div style="font-weight: bold; margin-bottom: 6px;">Choose Your Difficulty</div>
+                    <div class="memory-difficulty-grid">
+                        <?php $recommended_memory_difficulty = strtolower($user['current_difficulty'] ?? 'hard'); ?>
+                        <button type="button" class="memory-difficulty-card <?php echo $recommended_memory_difficulty === 'easy' ? 'recommended' : ''; ?>" data-memory-difficulty="easy">
+                            <h3>Easy</h3>
+                            <p>Choose the complete plate number.</p>
+                            <?php if ($recommended_memory_difficulty === 'easy'): ?><div class="memory-recommendation">Recommended for you</div><?php endif; ?>
+                        </button>
+                        <button type="button" class="memory-difficulty-card <?php echo $recommended_memory_difficulty === 'medium' ? 'recommended' : ''; ?>" data-memory-difficulty="medium">
+                            <h3>Medium</h3>
+                            <p>Choose the letter and number parts.</p>
+                            <?php if ($recommended_memory_difficulty === 'medium'): ?><div class="memory-recommendation">Recommended for you</div><?php endif; ?>
+                        </button>
+                        <button type="button" class="memory-difficulty-card <?php echo $recommended_memory_difficulty === 'hard' ? 'recommended' : ''; ?>" data-memory-difficulty="hard">
+                            <h3>Hard</h3>
+                            <p>Type the complete plate number.</p>
+                            <?php if ($recommended_memory_difficulty === 'hard'): ?><div class="memory-recommendation">Recommended for you</div><?php endif; ?>
+                        </button>
+                    </div>
                 </div>
                 <div id="mg-feedback" class="mg-feedback info">Choose a mode to begin the Memory Game.</div>
                 <div class="game-controls">
@@ -776,8 +894,11 @@
         </div>
 
         <div id="view-conveyor" class="app-view">
-            <div id="conveyor-mania-game" class="game-wrapper">
+            <div id="conveyor-mania-game" class="game-wrapper" data-conveyor-locked="<?php echo $conveyor_game_locked ? '1' : '0'; ?>">
                 <h2>Conveyor Mania</h2>
+                <?php if ($conveyor_game_locked): ?>
+                    <div class="cm-lock-message">Conveyor Mania is complete. It will unlock when the administrator adds new signage.</div>
+                <?php endif; ?>
                 <div class="cm-header">
                     <span>Time Remaining: <span id="cm-time-left">02:00</span></span>
                     <span>Sorted: <span id="cm-sorted-count">0</span> / <span id="cm-total-count">0</span></span>
@@ -786,6 +907,10 @@
                     <div id="cm-progress-fill"></div>
                     <div id="cm-progress-text">0%</div>
                 </div>
+                <details id="cm-sign-reference" class="cm-sign-reference">
+                    <summary>View sign meanings and categories</summary>
+                    <div id="cm-sign-reference-list" class="cm-reference-list"></div>
+                </details>
                 
                 <div id="cm-current-sign-label" style="font-weight: bold; color: #34495e;">Current Sign: --</div>
                 <div class="cm-conveyor-belt">
@@ -928,8 +1053,9 @@
         }
     </script>
     <script>
-        const ROADRANGER_SAVE_URL = "<?php echo '/' . basename(dirname(dirname(__DIR__))) . '/pages/users/memory_progress.php'; ?>";
-        console.log("Global Application URL mapped as:", ROADRANGER_SAVE_URL);
+        const ROADRANGER_SAVE_URL = "memory_progress.php";
+        const ROADRANGER_MEMORY_PROGRESS = <?php echo json_encode($memory_progress_by_stage, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const ROADRANGER_CONVEYOR_SIGNS = <?php echo json_encode($conveyor_signs, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     </script>
     
     <script src="../../assets/js/memory_game.js?v=<?php echo time(); ?>"></script>

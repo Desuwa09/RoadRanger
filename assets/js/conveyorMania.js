@@ -1,19 +1,29 @@
 (function conveyorManiaModule() {
   const GAME_DURATION_SECONDS = 120;
-  const signs = [
-    { id: 1, src: "../../assets/imgs/Signs/stop.png", category: "regulatory", label: "Stop" },
-    { id: 2, src: "../../assets/imgs/Signs/giveway.jpg", category: "regulatory", label: "Give Way" },
-    { id: 3, src: "../../assets/imgs/Signs/no_entry.png", category: "regulatory", label: "No Entry" },
-    { id: 4, src: "../../assets/imgs/Signs/no_leftturn.png", category: "regulatory", label: "No Left Turn" },
-    { id: 5, src: "../../assets/imgs/Signs/no_rightturn.png", category: "regulatory", label: "No Right Turn" },
-    { id: 6, src: "../../assets/imgs/Signs/max_60.png", category: "regulatory", label: "Maximum 60" },
-    { id: 7, src: "../../assets/imgs/Signs/min_40.png", category: "regulatory", label: "Minimum 40" },
-    { id: 8, src: "../../assets/imgs/Signs/slow_down.png", category: "warning", label: "Slow Down" },
-    { id: 9, src: "../../assets/imgs/Signs/use_overpass.png", category: "warning", label: "Use Overpass" },
-    { id: 10, src: "../../assets/imgs/Signs/keep_right.png", category: "warning", label: "Keep Right" },
-    { id: 11, src: "../../assets/imgs/Signs/one_way.png", category: "informative", label: "One Way" },
-    { id: 12, src: "../../assets/imgs/Signs/bike_lane.png", category: "informative", label: "Bike Lane" }
+  const defaultSigns = [
+    { id: 1, src: "../../assets/imgs/Signs/stop.png", category: "regulatory", label: "Stop", explanation: "Come to a complete stop before proceeding when it is safe." },
+    { id: 2, src: "../../assets/imgs/Signs/giveway.jpg", category: "regulatory", label: "Give Way", explanation: "Slow down and yield to traffic that has the right of way." },
+    { id: 3, src: "../../assets/imgs/Signs/no_entry.png", category: "regulatory", label: "No Entry", explanation: "Do not enter this road or lane from this direction." },
+    { id: 4, src: "../../assets/imgs/Signs/no_leftturn.png", category: "regulatory", label: "No Left Turn", explanation: "Turning left is prohibited at this location." },
+    { id: 5, src: "../../assets/imgs/Signs/no_rightturn.png", category: "regulatory", label: "No Right Turn", explanation: "Turning right is prohibited at this location." },
+    { id: 6, src: "../../assets/imgs/Signs/max_60.png", category: "regulatory", label: "Maximum 60", explanation: "Do not drive faster than 60 kilometers per hour." },
+    { id: 7, src: "../../assets/imgs/Signs/min_40.png", category: "regulatory", label: "Minimum 40", explanation: "Keep a speed of at least 40 kilometers per hour when conditions permit." },
+    { id: 8, src: "../../assets/imgs/Signs/slow_down.png", category: "warning", label: "Slow Down", explanation: "Reduce speed and prepare for a possible hazard ahead." },
+    { id: 9, src: "../../assets/imgs/Signs/use_overpass.png", category: "warning", label: "Use Overpass", explanation: "Pedestrians should use the overpass to cross the road safely." },
+    { id: 10, src: "../../assets/imgs/Signs/keep_right.png", category: "warning", label: "Keep Right", explanation: "Stay to the right side of the road or lane as directed." },
+    { id: 11, src: "../../assets/imgs/Signs/one_way.png", category: "informative", label: "One Way", explanation: "Traffic may travel only in the direction shown by the sign." },
+    { id: 12, src: "../../assets/imgs/Signs/bike_lane.png", category: "informative", label: "Bike Lane", explanation: "This lane is reserved for bicycles; vehicles should not block it." }
   ];
+
+  const signs = Array.isArray(window.ROADRANGER_CONVEYOR_SIGNS) && window.ROADRANGER_CONVEYOR_SIGNS.length
+    ? window.ROADRANGER_CONVEYOR_SIGNS.map((sign) => ({
+        id: Number(sign.item_id),
+        src: sign.item_image,
+        category: sign.target_category,
+        label: sign.item_label,
+        explanation: sign.item_label
+      }))
+    : defaultSigns;
 
   const state = {
     queue: [],
@@ -46,6 +56,8 @@
       progressText: byId("cm-progress-text"),
       feedback: byId("cm-feedback"),
       currentSignLabel: byId("cm-current-sign-label"),
+      referencePanel: byId("cm-sign-reference"),
+      referenceList: byId("cm-sign-reference-list"),
       dropzones: Array.from(document.querySelectorAll(".cm-dropzone"))
     };
   }
@@ -73,6 +85,27 @@
     if (type) refs.feedback.classList.add(type);
   }
 
+  function renderSignReference() {
+    refs.referenceList.innerHTML = "";
+    signs.forEach((sign) => {
+      const row = document.createElement("div");
+      row.className = "cm-reference-item";
+      const image = document.createElement("img");
+      image.src = sign.src;
+      image.alt = sign.label;
+      const details = document.createElement("span");
+      const meaning = document.createElement("strong");
+      meaning.textContent = sign.label;
+      const category = document.createElement("small");
+      category.textContent = sign.category;
+      const explanation = document.createElement("p");
+      explanation.textContent = sign.explanation || sign.label;
+      details.append(meaning, category, explanation);
+      row.append(image, details);
+      refs.referenceList.appendChild(row);
+    });
+  }
+
   function updateProgressUI() {
     const percent = Math.round((state.sortedCount / signs.length) * 100);
     refs.sortedCount.textContent = String(state.sortedCount);
@@ -87,8 +120,21 @@
     }
   }
 
+  function resetGameFromReference() {
+    if (state.isCompleted) return;
+    clearTimer();
+    state.queue = shuffle(signs);
+    state.currentSign = null;
+    state.sortedCount = 0;
+    state.timerLeft = GAME_DURATION_SECONDS;
+    refs.timeLeft.textContent = formatTimer(state.timerLeft);
+    updateProgressUI();
+    renderCurrentSign();
+    setFeedback("Reference opened. Your game has been reset. Close the reference to start again.", "info");
+  }
+
   function startTimer() {
-    if (state.timerId || state.isCompleted || !state.isActiveSection) return;
+    if (state.timerId || state.isCompleted || !state.isActiveSection || refs.referencePanel?.open) return;
     state.timerId = window.setInterval(() => {
       state.timerLeft -= 1;
       refs.timeLeft.textContent = formatTimer(Math.max(state.timerLeft, 0));
@@ -135,6 +181,15 @@
     state.queue.push(skipped);
     setFeedback("Sign skipped. It will return later in the loop.", "info");
     renderCurrentSign();
+    renderSignReference();
+
+    refs.referencePanel.addEventListener("toggle", () => {
+      if (refs.referencePanel.open) {
+        resetGameFromReference();
+      } else if (state.isActiveSection && !state.isCompleted) {
+        startTimer();
+      }
+    });
   }
 
   function completeGame() {
@@ -316,6 +371,8 @@
     refs = getRefs();
     if (!refs.gameCard || !refs.sign) return;
 
+    state.isCompleted = refs.gameCard.dataset.conveyorLocked === "1";
+
     refs.totalCount.textContent = String(signs.length);
     refs.timeLeft.textContent = formatTimer(state.timerLeft);
     refs.skipBtn.addEventListener("click", skipCurrentSign);
@@ -326,6 +383,13 @@
     updateProgressUI();
     setFeedback("Drag each sign into the right category box.", "info");
     renderCurrentSign();
+
+    if (state.isCompleted) {
+      refs.gameCard.classList.add("is-disabled");
+      refs.sign.draggable = false;
+      refs.skipBtn.disabled = true;
+      setFeedback("Conveyor Mania is locked until new signage is added by the administrator.", "info");
+    }
 
     const initialActive = document.getElementById("view-conveyor")?.classList.contains("active");
     activateSection(Boolean(initialActive));

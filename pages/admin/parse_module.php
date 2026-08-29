@@ -1,22 +1,139 @@
 <?php
 
-
-
-
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/module_schema.php';
 
 session_start();
 header('Content-Type: application/json');
+ob_start();
+register_shutdown_function(function () {
+    $output = ob_get_clean();
+    if ($output === '') {
+        return;
+    }
+
+    if (json_decode($output, true) !== null) {
+        echo $output;
+        return;
+    }
+
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'The module generation service returned an invalid server response.',
+        'raw_output' => substr(strip_tags($output), 0, 1024)
+    ]);
+});
 
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['is_admin']) || (int)$_SESSION['is_admin'] !== 1) {
     echo json_encode(['error' => 'Access Denied: Unauthorized Administrator Session']);
     exit;
 }
 
-$gemini_key = "AIzaSyAZFvjyF_YEGKJcKO7CsjxOsGX61Xgzg7U"; 
+function load_local_env_file() {
+    $candidate_paths = array(
+        dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env',
+        __DIR__ . DIRECTORY_SEPARATOR . '../../.env',
+        realpath(__DIR__ . '/../../') . DIRECTORY_SEPARATOR . '.env',
+        getcwd() . DIRECTORY_SEPARATOR . '.env',
+        isset($_SERVER['DOCUMENT_ROOT']) ? $_SERVER['DOCUMENT_ROOT'] . DIRECTORY_SEPARATOR . '.env' : null,
+    );
+
+    $env_path = null;
+    foreach ($candidate_paths as $path) {
+        if ($path && is_file($path)) {
+            $env_path = $path;
+            break;
+        }
+    }
+
+    if (!$env_path) {
+        return false;
+    }
+
+    $lines = file($env_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return false;
+    }
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || strpos($trimmed, '#') === 0) {
+            continue;
+        }
+
+        if (strpos($trimmed, '=') === false) {
+            continue;
+        }
+
+        [$name, $value] = explode('=', $trimmed, 2);
+        $name = trim($name);
+        $value = trim($value);
+
+        if ($value !== '' && preg_match('/^(".*"|\'.*\')$/', $value)) {
+            $value = substr($value, 1, -1);
+        }
+
+        if ($name !== '') {
+            putenv($name . '=' . $value);
+            $_ENV[$name] = $value;
+            $_SERVER[$name] = $value;
+        }
+    }
+
+    return true;
+}
+
+load_local_env_file();
+
+if (function_exists('set_time_limit')) {
+    @set_time_limit(180);
+}
+
+$gemini_key = $GEMINI_API_KEY ?? getenv('GEMINI_API_KEY') ?? ($_ENV['GEMINI_API_KEY'] ?? '');
+
+if (!$gemini_key || trim((string)$gemini_key) === '') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        echo json_encode(['error' => 'Gemini API key is not configured. Set the GEMINI_API_KEY environment variable or .env file before generating a module.']);
+        exit;
+    }
+}
+
+function normalize_inline_image_payload($image_data, $mime_type = 'image/png') {
+    if (!is_string($image_data)) {
+        return null;
+    }
+
+    $trimmed = trim($image_data);
+    if ($trimmed === '') {
+        return null;
+    }
+
+    $mime = is_string($mime_type) && $mime_type !== '' ? $mime_type : 'image/png';
+
+    if (preg_match('/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/s', $trimmed, $matches)) {
+        $mime = $matches[1];
+        $trimmed = $matches[2];
+    }
+
+    $trimmed = preg_replace('/\s+/', '', $trimmed);
+    if ($trimmed === '') {
+        return null;
+    }
+
+    return array(
+        'mime_type' => $mime,
+        'data' => $trimmed
+    );
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw_lto_text = isset($_POST['content']) ? trim($_POST['content']) : '';
     $action = isset($_POST['action']) ? trim($_POST['action']) : 'parse';
+    $source_image = null;
+
+    if (isset($_POST['image_data'])) {
+        $source_image = normalize_inline_image_payload($_POST['image_data'], isset($_POST['image_mime_type']) ? $_POST['image_mime_type'] : 'image/png');
+    }
 
     if ($raw_lto_text === '') {
         echo json_encode(['error' => 'System Error: Input text context cannot be blank.']);
@@ -69,8 +186,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         curl_setopt($process, CURLOPT_POST, true);
         curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($payload_array));
         curl_setopt($process, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-        curl_setopt($process, CURLOPT_TIMEOUT, 60);
-        curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($process, CURLOPT_TIMEOUT, 75);
+        curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 15);
 
         $server_output = curl_exec($process);
 
@@ -147,25 +264,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $instructions = "You are an educational assistant for the RoadRangers platform. ";
-    $instructions .= "Convert the following raw traffic/driving rules into an interactive scenario-based branching chatbot dialogue tree. ";
-    $instructions .= "Strict Requirement: Your response must be purely raw JSON conforming EXACTLY to this schema outline, without markdown formatting blocks:\n";
+    $instructions .= "Convert the supplied driving rules, road sign material, or scenario details into a readable learning module for citizens. ";
+    $instructions .= "Read the entire source text and use all important rules, not just the first section. Include the main points from the full document, including later rules, conditions, exceptions, and examples. ";
+    $instructions .= "The output must be valid JSON only, with short plain-language sentences that are easy for everyday users to understand. ";
+    $instructions .= "Do not return a branching chatbot tree or raw node structure. Do not include markdown fences or code blocks. ";
+    $instructions .= "Return this schema exactly:\n";
     $instructions .= "{\n";
-    $instructions .= "  \"nodes\": {\n";
-    $instructions .= "    \"start\": {\n";
-    $instructions .= "      \"bot_message\": \"Scenario setup or lesson question text...\",\n";
-    $instructions .= "      \"choices\": [\n";
-    $instructions .= "        { \"text\": \"Option A text\", \"next_node\": \"node_a\", \"score_impact\": 10 },\n";
-    $instructions .= "        { \"text\": \"Option B text\", \"next_node\": \"node_b\", \"score_impact\": 0 }\n";
-    $instructions .= "      ]\n";
-    $instructions .= "    },\n";
-    $instructions .= "    \"node_a\": { \"bot_message\": \"Feedback text for picking A.\", \"choices\": [] },\n";
-    $instructions .= "    \"node_b\": { \"bot_message\": \"Feedback text for picking B.\", \"choices\": [] }\n";
-    $instructions .= "  }\n";
+    $instructions .= "  \"title\": \"Short module title\",\n";
+    $instructions .= "  \"summary\": \"One or two easy sentences explaining the lesson.\",\n";
+    $instructions .= "  \"cover_image\": \"optional valid image URL or data URL\",\n";
+    $instructions .= "  \"content\": [\n";
+    $instructions .= "    { \"heading\": \"Key Rule\", \"text\": \"Simple sentence for the learner.\", \"image\": \"optional image URL\" },\n";
+    $instructions .= "    { \"heading\": \"What to do\", \"text\": \"Simple sentence for the learner.\", \"image\": \"optional image URL\" }\n";
+    $instructions .= "  ],\n";
+    $instructions .= "  \"quiz\": [\n";
+    $instructions .= "    {\n";
+    $instructions .= "      \"question\": \"Question for the lesson\",\n";
+    $instructions .= "      \"options\": [\n";
+    $instructions .= "        { \"text\": \"Correct answer\", \"correct\": true },\n";
+    $instructions .= "        { \"text\": \"Wrong answer\", \"correct\": false }\n";
+    $instructions .= "      ],\n";
+    $instructions .= "      \"explanation\": \"Brief reason for the correct answer.\"\n";
+    $instructions .= "    }\n";
+    $instructions .= "  ],\n";
+    $instructions .= "  \"pass_score\": 60\n";
     $instructions .= "}\n";
-    $instructions .= "Ensure the nodes flow logically. Final nodes must contain an empty choices array.";
+    $instructions .= "Rules: keep each lesson paragraph short, use everyday language, include 2 to 4 content sections, include 3 quiz questions unless the lesson is too short, include only one correct answer for each question, and add an image URL only when a road sign or visual is clearly relevant. If no image is relevant, set the image field to an empty string or omit it. IMPORTANT: do not skip key rules from the middle or end of the document; summarize the full source into the lesson without losing major points.";
 
     $system_part = array("parts" => array(array("text" => $instructions)));
-    $content_part = array("parts" => array(array("text" => "Analyze this LTO source reference text:\n\n" . $raw_lto_text)));
+    $content_parts = array(array("text" => "Analyze this LTO source reference text:\n\n" . $raw_lto_text));
+
+    if ($source_image !== null) {
+        $content_parts[] = array(
+            'inlineData' => array(
+                'mimeType' => $source_image['mime_type'],
+                'data' => $source_image['data']
+            )
+        );
+    }
+
+    $content_part = array("parts" => $content_parts);
     
     $payload_array = array(
         "contents" => array($content_part),
@@ -182,8 +320,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     curl_setopt($process, CURLOPT_POST, true);
     curl_setopt($process, CURLOPT_POSTFIELDS, json_encode($payload_array));
     curl_setopt($process, CURLOPT_HTTPHEADER, array('Content-Type: application/json'));
-    curl_setopt($process, CURLOPT_TIMEOUT, 60);
-    curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($process, CURLOPT_TIMEOUT, 75);
+    curl_setopt($process, CURLOPT_CONNECTTIMEOUT, 15);
     
     $server_output = curl_exec($process);
     
@@ -199,6 +337,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $result_data = json_decode($server_output, true);
     $ai_json_payload = null;
+
+    if (isset($result_data['error'])) {
+        $error_message = $result_data['error']['message'] ?? 'Unknown Gemini API error.';
+        $error_status = $result_data['error']['status'] ?? $http_status;
+        echo json_encode([
+            'error' => 'Gemini API Request Failed: ' . $error_message,
+            'status' => $error_status,
+            'debug_log' => $result_data
+        ]);
+        exit;
+    }
 
     if (is_array($result_data)) {
         if (isset($result_data['candidates'][0]['content']['parts'][0]['text'])) {
@@ -222,11 +371,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($ai_json_payload !== null) {
         $trimmed_payload = trim($ai_json_payload);
-        if (json_decode($trimmed_payload, true) === null) {
+        $decoded_payload = json_decode($trimmed_payload, true);
+        if ($decoded_payload === null) {
             echo json_encode([
                 'error' => 'Gemini returned text that is not valid JSON. Please try again or copy the output manually.',
                 'debug_log' => substr($trimmed_payload, 0, 512)
             ]);
+            exit;
+        }
+
+        if (class_exists('RoadRanger\\ModuleSchema')) {
+            $normalized_payload = \RoadRanger\ModuleSchema::normalizeGeneratedModule(is_array($decoded_payload) ? $decoded_payload : [], 'Road Safety Lesson');
+            echo json_encode($normalized_payload);
             exit;
         }
 

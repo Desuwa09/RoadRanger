@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'local/roadranger',
-        'pretty_version' => 'dev-main',
-        'version' => 'dev-main',
-        'reference' => '40a1baf89bbb7be95fea0c37a90c2566f3431250',
+        'pretty_version' => 'dev-clarenz',
+        'version' => 'dev-clarenz',
+        'reference' => 'e13399d1015406bad5937363597670d77266fa11',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -11,9 +11,9 @@
     ),
     'versions' => array(
         'local/roadranger' => array(
-            'pretty_version' => 'dev-main',
-            'version' => 'dev-main',
-            'reference' => '40a1baf89bbb7be95fea0c37a90c2566f3431250',
+            'pretty_version' => 'dev-clarenz',
+            'version' => 'dev-clarenz',
+            'reference' => 'e13399d1015406bad5937363597670d77266fa11',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

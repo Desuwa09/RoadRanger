@@ -9,9 +9,9 @@
   const NUMBER_POOL = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   const DIFFICULTY_MODE_MAP = {
-    easy: { stage: 1, label: 'Easy', builder: false },
-    medium: { stage: 2, label: 'Medium', builder: true },
-    hard: { stage: 3, label: 'Hard', builder: true }
+    easy: { stage: 1, label: 'Easy', inputType: 'whole-plate' },
+    medium: { stage: 2, label: 'Medium', inputType: 'parts' },
+    hard: { stage: 3, label: 'Hard', inputType: 'typed' }
   };
 
   const state = {
@@ -62,8 +62,10 @@
       completeBtn: byId("mg-complete-btn"),
       startBtn: byId("mg-start-btn"),
       nextLevelBtn: byId("mg-next-level-btn"),
-      difficultySelect: byId("mg-difficulty-select"),
+      difficultyCards: document.querySelectorAll("[data-memory-difficulty]"),
       mediumBuilder: byId("mg-medium-builder"),
+      easyChoicesPanel: byId("mg-easy-choices"),
+      easyChoices: byId("mg-easy-choice-options"),
       builderSlotLabel: byId("mg-builder-slot-label"),
       letterSlots: byId("mg-letter-slots"),
       numberSlots: byId("mg-number-slots"),
@@ -81,7 +83,7 @@
       plate += letters.charAt(Math.floor(Math.random() * letters.length));
     }
     plate += '-';
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       plate += numbers.charAt(Math.floor(Math.random() * numbers.length));
     }
     return plate;
@@ -100,8 +102,35 @@
   }
 
   function getSelectedDifficulty() {
-    const selected = refs.difficultySelect?.value || "";
+    const selected = document.querySelector("[data-memory-difficulty].is-selected")?.dataset.memoryDifficulty || "";
     return DIFFICULTY_MODE_MAP[selected] || null;
+  }
+
+  function getSavedModeProgress(stage) {
+    const saved = typeof ROADRANGER_MEMORY_PROGRESS !== 'undefined'
+      ? ROADRANGER_MEMORY_PROGRESS[String(stage)] || ROADRANGER_MEMORY_PROGRESS[stage]
+      : null;
+    return saved || { percent: 0, is_completed: 0 };
+  }
+
+  function resetRoundUI() {
+    clearTimers();
+    state.currentPlate = null;
+    state.isDisplaying = false;
+    state.isGuessing = false;
+    state.isCompleted = false;
+    refs.plateDisplay.style.display = 'grid';
+    refs.plateDisplay.querySelector('.plate-number').textContent = '---';
+    refs.inputContainer.style.display = 'none';
+    refs.easyChoicesPanel.style.display = 'none';
+    refs.mediumBuilder.style.display = 'none';
+    refs.userInputField.value = "";
+    refs.userInputField.disabled = true;
+    refs.completeBtn.disabled = true;
+    refs.nextLevelBtn.style.display = 'none';
+    refs.startBtn.disabled = false;
+    refs.displayTimer.textContent = formatTimer(0);
+    refs.guessTimer.textContent = formatTimer(0);
   }
 
   function applySelectedDifficulty() {
@@ -119,13 +148,17 @@
     }
 
     state.currentStage = mode.stage;
-    state.currentLevel = 1;
     state.totalLevels = STAGE_CONFIG[mode.stage].levels;
-    state.completedLevels = 0;
+    const savedProgress = getSavedModeProgress(mode.stage);
+    state.completedLevels = Math.min(state.totalLevels, Math.max(0, Math.floor(Number(savedProgress.percent) / 10)));
+    state.currentLevel = Math.min(state.completedLevels + 1, state.totalLevels);
+    state.isCompleted = Number(savedProgress.is_completed) === 1 || state.completedLevels >= state.totalLevels;
     updateLevelDisplay();
     updateProgressUI();
-    refs.startBtn.disabled = false;
-    setFeedback(`Mode selected: ${mode.label}. Click Start to begin.`, "info");
+    resetRoundUI();
+    state.isCompleted = Number(savedProgress.is_completed) === 1 || state.completedLevels >= state.totalLevels;
+    refs.startBtn.disabled = state.isCompleted;
+    setFeedback(state.isCompleted ? `${mode.label} is already completed.` : `${mode.label} selected. Click Start to continue.`, state.isCompleted ? "success" : "info");
   }
 
   function shuffleArray(items) {
@@ -155,8 +188,36 @@
     const [plateLetters, plateNumbers] = plate.split("-");
     return {
       letters: buildChoicePool(plateLetters, 6, LETTER_POOL, 3),
-      numbers: buildChoicePool(plateNumbers, 6, NUMBER_POOL, 4)
+      numbers: buildChoicePool(plateNumbers, 6, NUMBER_POOL, 3)
     };
+  }
+
+  function generateWholePlateChoices(plate) {
+    const choices = [plate];
+    while (choices.length < 6) {
+      const candidate = generatePlateNumber();
+      if (!choices.includes(candidate)) choices.push(candidate);
+    }
+    return shuffleArray(choices);
+  }
+
+  function renderWholePlateChoices() {
+    refs.easyChoices.innerHTML = "";
+    state.builderChoices.wholePlates.forEach((plate) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = plate;
+      btn.style.padding = "10px 14px";
+      btn.style.borderRadius = "6px";
+      btn.style.border = "1px solid #bfdbfe";
+      btn.style.background = state.builderSelections.wholePlate === plate ? "#bfdbfe" : "#eff6ff";
+      btn.style.cursor = "pointer";
+      btn.addEventListener("click", () => {
+        state.builderSelections.wholePlate = plate;
+        renderWholePlateChoices();
+      });
+      refs.easyChoices.appendChild(btn);
+    });
   }
 
   function renderBuilderSlots() {
@@ -236,6 +297,7 @@
     state.activeBuilderSlot = "letters";
     state.builderSelections.letters = "";
     state.builderSelections.numbers = "";
+    state.builderSelections.wholePlate = "";
     state.builderChoices = generateBuilderChoices(state.currentPlate);
     renderBuilderSlots();
   }
@@ -298,15 +360,21 @@
     
     refs.plateDisplay.style.display = 'none';
     const mode = getSelectedDifficulty();
-    const usesBuilder = Boolean(mode && mode.builder);
+    const inputType = mode ? mode.inputType : 'typed';
 
-    refs.inputContainer.style.display = usesBuilder ? 'none' : 'block';
-    refs.mediumBuilder.style.display = usesBuilder ? 'block' : 'none';
+    refs.inputContainer.style.display = inputType === 'typed' ? 'block' : 'none';
+    refs.easyChoicesPanel.style.display = inputType === 'whole-plate' ? 'block' : 'none';
+    refs.mediumBuilder.style.display = inputType === 'parts' ? 'block' : 'none';
 
-    if (usesBuilder) {
+    if (inputType === 'whole-plate') {
+      state.builderChoices.wholePlates = generateWholePlateChoices(state.currentPlate);
+      renderWholePlateChoices();
+      refs.completeBtn.disabled = false;
+      setFeedback(`Choose the complete plate number you just saw! ${state.guessTimeLeft} seconds remaining...`, "info");
+    } else if (inputType === 'parts') {
       resetBuilderSelections();
       refs.completeBtn.disabled = false;
-      setFeedback(`Build the plate number from the letter and number choices! ${state.guessTimeLeft} seconds remaining...`, "info");
+      setFeedback(`Choose the letter group and number group from the plate! ${state.guessTimeLeft} seconds remaining...`, "info");
     } else {
       refs.userInputField.disabled = false;
       refs.userInputField.focus();
@@ -327,15 +395,21 @@
 
   function checkAnswer() {
     const mode = getSelectedDifficulty();
-    const usesBuilder = Boolean(mode && mode.builder);
+    const inputType = mode ? mode.inputType : 'typed';
     let submittedAnswer = "";
 
-    if (usesBuilder) {
+    if (inputType === 'whole-plate') {
+      submittedAnswer = state.builderSelections.wholePlate.trim().toUpperCase();
+      if (!submittedAnswer) {
+        setFeedback("Please choose a complete plate number before submitting.", "error");
+        return;
+      }
+    } else if (inputType === 'parts') {
       const letterAnswer = state.builderSelections.letters.trim().toUpperCase();
       const numberAnswer = state.builderSelections.numbers.trim().toUpperCase();
       submittedAnswer = `${letterAnswer}-${numberAnswer}`;
 
-      if (!letterAnswer || !numberAnswer || letterAnswer.length < 3 || numberAnswer.length < 4) {
+      if (!letterAnswer || !numberAnswer || letterAnswer.length < 3 || numberAnswer.length < 3) {
         setFeedback("Please choose the correct letter group and number group before submitting.", "error");
         return;
       }
@@ -397,6 +471,7 @@
     state.totalLevels = STAGE_CONFIG[state.currentStage].levels;
     state.currentPlate = generatePlateNumber();
     state.builderChoices = generateBuilderChoices(state.currentPlate);
+    state.builderChoices.wholePlates = generateWholePlateChoices(state.currentPlate);
     state.isCompleted = false;
     
     refs.displayTimer.textContent = formatTimer(STAGE_CONFIG[state.currentStage].displayTime);
@@ -474,7 +549,7 @@
     if (state.isCompleted) return;
     if (isActive) {
       refs.gameCard.classList.remove("is-disabled");
-      refs.startBtn.disabled = false;
+      refs.startBtn.disabled = !getSelectedDifficulty();
     } else {
       clearTimers();
       refs.gameCard.classList.add("is-disabled");
@@ -492,9 +567,11 @@
     refs.startBtn.addEventListener("click", startNewLevel);
     refs.completeBtn.addEventListener("click", checkAnswer);
     refs.nextLevelBtn.addEventListener("click", nextLevel);
-    refs.difficultySelect.addEventListener("change", () => {
+    refs.difficultyCards.forEach((card) => card.addEventListener("click", () => {
+      refs.difficultyCards.forEach((option) => option.classList.remove("is-selected"));
+      card.classList.add("is-selected");
       applySelectedDifficulty();
-    });
+    }));
 
     refs.userInputField.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !refs.completeBtn.disabled) {
