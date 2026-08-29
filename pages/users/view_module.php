@@ -382,7 +382,7 @@ if (moduleFormat === 'lesson') {
     const lessonChoices = document.getElementById('lesson-choices');
     const lessonQuestions = Array.isArray(moduleData?.quiz) ? moduleData.quiz : [];
     const answeredState = {};
-    const lessonNodes = {};
+    let lessonNodes = {};
     const sections = Array.isArray(moduleData?.content)
         ? moduleData.content
         : Array.isArray(moduleData?.sections)
