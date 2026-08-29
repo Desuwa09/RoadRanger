@@ -261,6 +261,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $instructions = "You are an educational assistant for the RoadRangers platform. ";
     $instructions .= "Convert the supplied driving rules, road sign material, or scenario details into a readable learning module for citizens. ";
+    $instructions .= "Read the entire source text and use all important rules, not just the first section. Include the main points from the full document, including later rules, conditions, exceptions, and examples. ";
     $instructions .= "The output must be valid JSON only, with short plain-language sentences that are easy for everyday users to understand. ";
     $instructions .= "Do not return a branching chatbot tree or raw node structure. Do not include markdown fences or code blocks. ";
     $instructions .= "Return this schema exactly:\n";
@@ -284,7 +285,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $instructions .= "  ],\n";
     $instructions .= "  \"pass_score\": 60\n";
     $instructions .= "}\n";
-    $instructions .= "Rules: keep each lesson paragraph short, use everyday language, include 2 to 4 content sections, include 3 quiz questions unless the lesson is too short, include only one correct answer for each question, and add an image URL only when a road sign or visual is clearly relevant. If no image is relevant, set the image field to an empty string or omit it.";
+    $instructions .= "Rules: keep each lesson paragraph short, use everyday language, include 2 to 4 content sections, include 3 quiz questions unless the lesson is too short, include only one correct answer for each question, and add an image URL only when a road sign or visual is clearly relevant. If no image is relevant, set the image field to an empty string or omit it. IMPORTANT: do not skip key rules from the middle or end of the document; summarize the full source into the lesson without losing major points.";
 
     $system_part = array("parts" => array(array("text" => $instructions)));
     $content_parts = array(array("text" => "Analyze this LTO source reference text:\n\n" . $raw_lto_text));

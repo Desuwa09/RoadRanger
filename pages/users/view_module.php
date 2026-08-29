@@ -84,10 +84,32 @@ try {
     $fallback_message = '';
     $module_format = 'legacy';
     $decoded = json_decode($module['module_data'], true);
+    if (!is_array($decoded) && is_string($module['module_data'])) {
+        $decoded = json_decode(trim($module['module_data']), true);
+    }
+
     if (is_array($decoded)) {
-        if (isset($decoded['content']) && is_array($decoded['content'])) {
+        if (isset($decoded['lesson']) && is_array($decoded['lesson'])) {
+            $decoded = $decoded['lesson'];
+        }
+
+        if (
+            (isset($decoded['content']) && is_array($decoded['content'])) ||
+            (isset($decoded['sections']) && is_array($decoded['sections'])) ||
+            (isset($decoded['steps']) && is_array($decoded['steps'])) ||
+            (isset($decoded['summary']) && (isset($decoded['quiz']) || isset($decoded['content']) || isset($decoded['sections'])))
+        ) {
             $module_data = $decoded;
             $module_format = 'lesson';
+            if (isset($module_data['content']) && !is_array($module_data['content'])) {
+                $module_data['content'] = [];
+            }
+            if (isset($module_data['sections']) && is_array($module_data['sections']) && empty($module_data['content'])) {
+                $module_data['content'] = $module_data['sections'];
+            }
+            if (isset($module_data['steps']) && is_array($module_data['steps']) && empty($module_data['content'])) {
+                $module_data['content'] = $module_data['steps'];
+            }
         } elseif (isset($decoded[$selected_lang]) && is_array($decoded[$selected_lang])) {
             $module_data = $decoded[$selected_lang];
         } elseif (isset($decoded['en']) && is_array($decoded['en'])) {
@@ -361,7 +383,13 @@ if (moduleFormat === 'lesson') {
     const lessonQuestions = Array.isArray(moduleData?.quiz) ? moduleData.quiz : [];
     const answeredState = {};
     const lessonNodes = {};
-    const sections = Array.isArray(moduleData?.content) ? moduleData.content : [];
+    const sections = Array.isArray(moduleData?.content)
+        ? moduleData.content
+        : Array.isArray(moduleData?.sections)
+            ? moduleData.sections
+            : Array.isArray(moduleData?.steps)
+                ? moduleData.steps
+                : [];
 
     function createImageElement(src, alt) {
         const imageEl = document.createElement('img');
